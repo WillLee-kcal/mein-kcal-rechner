@@ -32,7 +32,7 @@ def lade_daten_gs(sheet_name):
         client = get_gsheet_client()
         sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
         df = pd.DataFrame(sheet.get_all_records())
-        df.columns = df.columns.str.strip()
+        df.columns = df.columns.str.strip() # Entfernt unsichtbare Leerzeichen
         return df
     except:
         return pd.DataFrame()
@@ -51,7 +51,7 @@ def speichere_df_gs(df, sheet_name):
 # --- 2. LAYOUT ---
 st.set_page_config(page_title="Kcal Profi-Tracker", layout="wide", page_icon="🍎")
 st.sidebar.title("🍎 Navigation")
-menu = st.sidebar.radio("Menü:", ["1. Mahlzeit & Logbuch", "2. Dashboard (Grafik)", "3. Patientenverwaltung", "4. Datenbank"])
+menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit & Logbuch", "2. Dashboard (Grafik)", "3. Patientenverwaltung", "4. Datenbank"])
 
 # --- MODUL 1: MAHLZEIT ERFASSEN ---
 if menu == "1. Mahlzeit & Logbuch":
@@ -60,106 +60,114 @@ if menu == "1. Mahlzeit & Logbuch":
     df_p = lade_daten_gs("patienten")
     
     if df_p.empty:
-        st.warning("Bitte erst Patienten anlegen.")
+        st.warning("Bitte lege zuerst unter Punkt 3 einen Patienten an.")
     else:
         col1, col2 = st.columns(2)
         with col1:
-            p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
-            m_zeit = st.selectbox("Mahlzeit wählen:", MAHLZEITEN_LISTE)
-            typ_f = st.radio("Datenbank:", ["Intern", "Extern", "Alle"], horizontal=True)
+            p_wahl = st.selectbox("Für welchen Patienten?", df_p["Name"])
+            m_zeit = st.selectbox("Mahlzeit auswählen:", MAHLZEITEN_LISTE)
+            typ_f = st.radio("Kategorie:", ["Intern", "Extern", "Alle"], horizontal=True)
             
         with col2:
-            suche = st.text_input("Lebensmittel suchen:")
+            suche = st.text_input("Lebensmittel suchen (z.B. Mischbrot):")
             
         if suche:
+            # Suche in der Datenbank
             df_f = df_db if typ_f == "Alle" else df_db[df_db['Typ'] == typ_f]
             treffer = df_f[df_f['Name'].str.contains(suche, case=False, na=False)]
             
             if not treffer.empty:
                 wahl = st.selectbox("Gefunden:", treffer['Name'])
                 item = treffer[treffer['Name'] == wahl].iloc[0]
-                st.info(f"Einheit laut Vorlage: {item.get('Standard_Menge', '1 Stück')}")
+                
+                # Info zur Standardmenge
+                st.info(f"💡 Info aus Vorlage: 1 Einheit = {item.get('Standard_Menge', '1 Stück')}")
                 
                 c3, c4 = st.columns(2)
                 with c3:
-                    menge = st.number_input("Menge:", min_value=0.0, step=0.5, value=1.0)
+                    menge = st.number_input("Anzahl / Menge:", min_value=0.0, step=0.5, value=1.0)
                 with c4:
-                    basis = st.radio("Basis:", ["Stück / Einheit", "Gramm"])
+                    basis = st.radio("Berechnung nach:", ["Stück / Einheit", "Gramm"])
                 
-                # Berechnung
-                sw = pd.to_numeric(item['stueck_gewicht'], errors='coerce') or 0
-                k100 = pd.to_numeric(item['kcal_100g'], errors='coerce') or 0
-                gewicht = menge * sw if basis == "Stück / Einheit" else menge
-                kcal_t = (k100 / 100) * gewicht
+                # --- KORREKTE BERECHNUNG ---
+                # Wir holen die Zahlenwerte und sichern sie gegen Textfehler ab
+                stk_gewicht = pd.to_numeric(item['stueck_gewicht'], errors='coerce') or 0
+                kcal_100g = pd.to_numeric(item['kcal_100g'], errors='coerce') or 0
                 
-                st.metric("Ergebnis", f"{kcal_t:.1f} kcal")
+                # Gesamtgewicht bestimmen
+                gewicht_final = menge * stk_gewicht if basis == "Stück / Einheit" else menge
                 
-                if st.button("In Logbuch speichern"):
+                # Kcal berechnen: (kcal pro 100g / 100) * Gewicht
+                kcal_total = (kcal_100g / 100) * gewicht_final
+                
+                st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal", help=f"Rechnung: ({kcal_100g} / 100) * {gewicht_final}g")
+                
+                if st.button("💾 In Logbuch speichern"):
                     heute = datetime.now().strftime("%Y-%m-%d")
-                    # ACHTUNG: Reihenfolge muss zum Google Sheet passen!
-                    speichere_zeile_gs([heute, p_wahl, m_zeit, wahl, gewicht, kcal_t], "verzehr")
-                    st.success(f"Gespeichert unter {m_zeit}!")
+                    # Speichern: Datum, Patient, Mahlzeit, Lebensmittel, Menge, Kcal
+                    speichere_zeile_gs([heute, p_wahl, m_zeit, wahl, gewicht_final, kcal_total], "verzehr")
+                    st.success(f"Eintrag für {m_zeit} wurde gespeichert!")
             else:
-                st.error("Nichts gefunden.")
+                st.error("Kein Lebensmittel mit diesem Namen gefunden.")
 
-# --- MODUL 2: DASHBOARD ---
+# --- MODUL 2: DASHBOARD (GRAFIK & 6 MAHLZEITEN) ---
 elif menu == "2. Dashboard (Grafik)":
-    st.header("📊 Tageszusammenfassung")
+    st.header("📊 Tageszusammenfassung & Status")
     df_v = lade_daten_gs("verzehr")
     df_p = lade_daten_gs("patienten")
     
-    if not df_p.empty:
+    if df_p.empty:
+        st.info("Noch keine Patienten vorhanden.")
+    else:
         p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
         p_data = df_p[df_p["Name"] == p_wahl].iloc[0]
         heute = datetime.now().strftime("%Y-%m-%d")
         
-        # Biometrie-Metrics (BMI etc.)
+        # 🧬 Biometrie (BMI etc.)
         w = pd.to_numeric(p_data.get("Gewicht_aktuell", 0), errors='coerce') or 0
         h = pd.to_numeric(p_data.get("Groesse_cm", 0), errors='coerce') or 0
         bmi = round(w / ((h/100)**2), 1) if h > 0 else 0
         
-        cols = st.columns(4)
-        cols[0].metric("Gewicht", f"{w} kg")
-        cols[1].metric("BMI", f"{bmi}")
-        cols[2].metric("Ziel", p_data.get("Ziel_Perzentile", "-"))
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Gewicht", f"{w} kg")
+        c2.metric("BMI", f"{bmi}")
+        c3.metric("Ziel", p_data.get("Ziel_Perzentile", "-"))
+        c4.metric("Wiegedatum", p_data.get("Wiegedatum", "-"))
         
         st.divider()
         
-        # 6 Mahlzeiten Struktur
+        # 🍴 Kalorien-Check (6 Mahlzeiten)
         if not df_v.empty:
             df_v["Datum"] = df_v["Datum"].astype(str)
             df_heute = df_v[(df_v["Datum"] == heute) & (df_v["Patient"] == p_wahl)]
             
-            # Zusammenfassung oben
             gesamt_kcal = df_heute["Kcal_Gesamt"].sum() if not df_heute.empty else 0
             ziel_kcal = pd.to_numeric(p_data["Ziel_Kcal"], errors='coerce') or 2000
-            st.subheader(f"Gesamt: {gesamt_kcal:.0f} / {ziel_kcal:.0f} kcal")
+            
+            st.subheader(f"Kalorien: {gesamt_kcal:.0f} von {ziel_kcal:.0f} kcal")
             st.progress(min(gesamt_kcal/ziel_kcal, 1.0) if ziel_kcal > 0 else 0)
             
-            st.write("### Aufteilung der Mahlzeiten")
-            
-            # Jede Mahlzeit einzeln darstellen
+            # Mahlzeiten-Einteilung
+            st.write("### Tagesplan (6 Mahlzeiten)")
             for m in MAHLZEITEN_LISTE:
                 m_data = df_heute[df_heute["Mahlzeit"] == m]
                 m_sum = m_data["Kcal_Gesamt"].sum()
                 
-                with st.expander(f"{m} - ({m_sum:.0f} kcal)"):
+                with st.expander(f"{m} — {m_sum:.0f} kcal"):
                     if not m_data.empty:
-                        for i, row in m_data.iterrows():
-                            c1, c2 = st.columns([4, 1])
-                            c1.write(f"**{row['Lebensmittel']}**: {row['Kcal_Gesamt']:.0f} kcal")
-                            if c2.button("Löschen", key=f"del_{i}"):
+                        for idx, row in m_data.iterrows():
+                            col_l, col_r = st.columns([4, 1])
+                            col_l.write(f"**{row['Lebensmittel']}** ({row['Menge_g']:.0f}g) = {row['Kcal_Gesamt']:.1f} kcal")
+                            if col_r.button("🗑️", key=f"del_{idx}"):
                                 full_v = lade_daten_gs("verzehr")
-                                # Löschen basierend auf exaktem Abgleich
-                                full_v = full_v.drop(i)
+                                full_v = full_v.drop(idx)
                                 speichere_df_gs(full_v, "verzehr")
                                 st.rerun()
                     else:
-                        st.info("Noch kein Eintrag.")
+                        st.write("🚫 Keine Einträge für diese Mahlzeit.")
         else:
-            st.info("Logbuch leer.")
+            st.info("Logbuch ist für heute noch leer.")
 
-# (Patienten- und Datenbank-Modul 3 & 4 bleiben wie bisher...)
 
 # --- MODUL 3: PATIENTEN ---
 elif menu == "3. Patientenverwaltung":
@@ -216,5 +224,6 @@ elif menu == "4. Datenbank bearbeiten":
                 df_db = pd.concat([df_db, new_f], ignore_index=True)
                 speichere_df_gs(df_db, "lebensmittel")
                 st.rerun()
+
 
 
