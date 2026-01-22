@@ -55,7 +55,6 @@ def speichere_df_gs(df, sheet_name):
         client = get_gsheet_client()
         sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
         sheet.clear()
-        # Wichtig: NaN Werte zu leeren Strings machen für Google Sheets
         df_clean = df.fillna("")
         sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
         st.cache_data.clear() 
@@ -186,28 +185,35 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-# --- MODUL 4: DATENBANK (EDITIERBARER EXCEL-MODUS) ---
+# --- MODUL 4: DATENBANK (VOLL EDITIERBAR) ---
 elif menu == "4. Datenbank (Editierbar)":
-    st.header("📊 Lebensmittel-Datenbank (Direkt-Editor)")
-    st.info("💡 Du kannst Werte direkt in der Tabelle ändern, Zeilen hinzufügen oder löschen. Klicke danach auf den Speicher-Button unten.")
+    st.header("📊 Lebensmittel-Datenbank Editor")
+    st.info("💡 Bearbeite Name, Kcal oder Gewichte direkt in der Tabelle. Neue Lebensmittel kannst du in der untersten Zeile hinzufügen.")
     
     df_db = lade_daten_gs("lebensmittel")
     
     if not df_db.empty:
-        # Der magische Editor
+        # Konfiguration der Spalten für bessere Bedienung
         edited_df = st.data_editor(
             df_db, 
-            num_rows="dynamic", # Erlaubt das Hinzufügen/Löschen von Zeilen
+            num_rows="dynamic", 
             use_container_width=True,
             hide_index=True,
-            key="db_editor"
+            column_config={
+                "Name": st.column_config.TextColumn("Bezeichnung", required=True),
+                "kcal_100g": st.column_config.NumberColumn("kcal/100g", min_value=0, format="%d"),
+                "stueck_gewicht": st.column_config.NumberColumn("Gewicht (g)", min_value=0, format="%d"),
+                "kcal_pro_Einheit": st.column_config.NumberColumn("kcal/Einheit", min_value=0, format="%d"),
+                "Standard_Menge": st.column_config.TextColumn("Einheit (Text)"),
+                "Typ": st.column_config.SelectboxColumn("Typ", options=["Intern", "Extern"])
+            },
+            key="db_full_editor"
         )
         
-        col_s1, col_s2 = st.columns([1, 4])
-        if col_s1.button("💾 Änderungen speichern"):
-            with st.spinner("Speichere Daten in Google Sheets..."):
+        if st.button("💾 Alle Änderungen in Google Sheets speichern"):
+            with st.spinner("Synchronisiere Datenbank..."):
                 speichere_df_gs(edited_df, "lebensmittel")
-                st.success("Datenbank erfolgreich aktualisiert!")
+                st.success("Die Datenbank wurde aktualisiert!")
                 st.rerun()
     else:
         st.error("Datenbank konnte nicht geladen werden.")
