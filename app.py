@@ -117,19 +117,7 @@ if menu == "1. Mahlzeit erfassen":
     else:
         st.warning("Bitte stelle sicher, dass Patienten und Lebensmittel in der Datenbank vorhanden sind.")
 
-# --- MODUL 2, 3 & 4 (BLEIBEN WIE GEHABT) ---
-elif menu == "2. Patienten-Dashboard":
-    # ... (Dein bisheriger Dashboard-Code)
-    st.write("Hier erscheint dein Dashboard") # Platzhalter
 
-elif menu == "3. Patientenverwaltung":
-    # ... (Dein bisheriger Patienten-Code)
-    st.write("Hier erscheint die Patientenverwaltung") # Platzhalter
-
-elif menu == "4. Datenbank-Info":
-    st.header("📊 Lebensmittel-Übersicht")
-    df_db = lade_daten_gs("lebensmittel")
-    st.dataframe(df_db, use_container_width=True, hide_index=True)
 
 # --- MODUL 2: DASHBOARD ---
 elif menu == "2. Patienten-Dashboard":
@@ -210,4 +198,5 @@ elif menu == "4. Datenbank-Info":
     if not df_db.empty:
         st.write("Deine aktuelle Lebensmittel-Liste:")
         st.dataframe(df_db, use_container_width=True, hide_index=True)
+
 
