@@ -83,20 +83,25 @@ if menu == "1. Mahlzeit & Logbuch":
                 with c4:
                     basis = st.radio("Berechnung nach:", ["Stück / Einheit", "Gramm"])
                 
-                # RECHENLOGIK KORRIGIERT
+                # --- RECHENLOGIK ---
                 stk_w = pd.to_numeric(item['stueck_gewicht'], errors='coerce') or 0
                 kcal_100 = pd.to_numeric(item['kcal_100g'], errors='coerce') or 0
                 
                 gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
-                # WICHTIG: Division durch 100 für kcal/100g
+                
+                # Berechnung mit expliziter Division durch 100
                 kcal_total = (kcal_100 / 100) * gewicht
+                
+                # Kontroll-Anzeige für dich (Debug)
+                st.write(f"DEBUG: {kcal_100} kcal/100g | {gewicht}g gesamt | Ergebnis: {kcal_total:.1f}")
                 
                 st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal")
                 
                 if st.button("💾 In Logbuch speichern"):
                     heute = datetime.now().strftime("%Y-%m-%d")
-                    speichere_zeile_gs([heute, p_wahl, m_zeit, wahl, gewicht, kcal_total], "verzehr")
-                    st.success(f"Eintrag gespeichert!")
+                    # Speichern: Datum, Patient, Mahlzeit, Lebensmittel, Menge, Kcal
+                    speichere_zeile_gs([heute, p_wahl, m_zeit, wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
+                    st.success(f"Eintrag für {m_zeit} gespeichert!")
             else:
                 st.error("Nichts gefunden.")
 
@@ -139,6 +144,7 @@ elif menu == "2. Dashboard (Grafik)":
                     if not m_data.empty:
                         for idx, row in m_data.iterrows():
                             c_l, c_r = st.columns([4, 1])
+                            # Anzeige aus der Tabelle verzehr
                             c_l.write(f"**{row['Lebensmittel']}**: {row['Kcal_Gesamt']:.1f} kcal")
                             if c_r.button("🗑️", key=f"del_{idx}"):
                                 full_v = lade_daten_gs("verzehr")
@@ -148,7 +154,7 @@ elif menu == "2. Dashboard (Grafik)":
                     else:
                         st.write("Keine Einträge.")
 
-# --- MODUL 3: PATIENTEN ---
+# --- (Module 3 & 4 Patienten & Datenbank bleiben wie bisher) ---
 elif menu == "3. Patientenverwaltung":
     st.header("👥 Patientenverwaltung")
     df_p = lade_daten_gs("patienten")
@@ -185,7 +191,6 @@ elif menu == "3. Patientenverwaltung":
                     speichere_df_gs(df_p, "patienten")
                     st.rerun()
 
-# --- MODUL 4: DATENBANK ---
 elif menu == "4. Datenbank bearbeiten":
     st.header("📊 Lebensmittel")
     df_db = lade_daten_gs("lebensmittel")
