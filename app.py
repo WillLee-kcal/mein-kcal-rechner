@@ -238,22 +238,27 @@ elif menu == "4. Datenbank (Editierbar)":
                             col_a.write(f"**{p_name}** ({p_brand}) - {p_kcal} kcal/100g")
                             
                             # Import-Button für dieses spezifische Produkt
+                            # Import-Button für dieses spezifische Produkt
                             if col_b.button("📥 Importieren", key=f"import_{p.get('_id')}"):
-    # Wir bereiten die Daten vor
-    p_name = p.get('product_name', 'Unbekannt')
-    nutriments = p.get('nutriments', {})
-    p_kcal = nutriments.get('energy-kcal_100g', 0)
-    
-    # WICHTIG: Die Reihenfolge muss exakt deinem Google Sheet entsprechen:
-    # [Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ]
-    neue_zeile = [
-        p_name,      # Spalte 1: Name
-        p_kcal,      # Spalte 2: kcal_100g
-        0,           # Spalte 3: stueck_gewicht (wird später manuell im Editor gefüllt)
-        "1 Stück",   # Spalte 4: Standard_Menge (JETZT AN POSITION 4)
-        0,           # Spalte 5: kcal_pro_Einheit (JETZT AN POSITION 5)
-        "Extern"     # Spalte 6: Typ
-    ]
+                                # Daten vorbereiten
+                                p_name = p.get('product_name', 'Unbekannt')
+                                nutriments = p.get('nutriments', {})
+                                p_kcal = nutriments.get('energy-kcal_100g', 0)
+                                
+                                # Die Reihenfolge muss exakt deinem Google Sheet entsprechen:
+                                # [Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ]
+                                neue_zeile = [
+                                    p_name,      # Spalte A: Name
+                                    p_kcal,      # Spalte B: kcal_100g
+                                    0,           # Spalte C: stueck_gewicht
+                                    "1 Stück",   # Spalte D: Standard_Menge
+                                    0,           # Spalte E: kcal_pro_Einheit
+                                    "Extern"     # Spalte F: Typ
+                                ]
+                                
+                                speichere_zeile_gs(neue_zeile, "lebensmittel")
+                                st.success(f"'{p_name}' wurde hinzugefügt!")
+                                st.rerun()
     
     speichere_zeile_gs(neue_zeile, "lebensmittel")
     st.success(f"'{p_name}' wurde korrekt zugeordnet und hinzugefügt!")
@@ -262,4 +267,5 @@ elif menu == "4. Datenbank (Editierbar)":
                             st.write(f"⚪ {p_name} - (Keine Kcal-Daten verfügbar)")
                 else:
                     st.error("Keine Produkte gefunden.")
+
 
