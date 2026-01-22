@@ -13,7 +13,6 @@ MAHLZEITEN_LISTE = [
 
 # --- 1. SETUP & TURBO-CACHING ---
 
-# Hilfsfunktion für den Google-Client
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -28,7 +27,6 @@ def get_gsheet_client():
         st.error(f"Verbindung fehlgeschlagen: {e}")
         return None
 
-# Daten-Cache: Merkt sich die Tabellen für 10 Minuten
 @st.cache_data(ttl=600)
 def lade_daten_gs_cached(sheet_name):
     client = get_gsheet_client()
@@ -42,16 +40,14 @@ def lade_daten_gs_cached(sheet_name):
         except: return pd.DataFrame()
     return pd.DataFrame()
 
-# Standard-Ladefunktion (nutzt den Cache)
 def lade_daten_gs(sheet_name):
     return lade_daten_gs_cached(sheet_name)
 
-# Speicherfunktionen (leeren den Cache nach Änderung)
 def speichere_zeile_gs(liste_werte, sheet_name):
     try:
         client = get_gsheet_client()
         client.open("Kcal_Datenbank").worksheet(sheet_name).append_row(liste_werte)
-        st.cache_data.clear() # Cache leeren!
+        st.cache_data.clear() 
     except: st.error("Fehler beim Speichern.")
 
 def speichere_df_gs(df, sheet_name):
@@ -61,7 +57,7 @@ def speichere_df_gs(df, sheet_name):
         sheet.clear()
         df_clean = df.fillna("")
         sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
-        st.cache_data.clear() # Cache leeren!
+        st.cache_data.clear() 
     except: st.error("Fehler beim Update.")
 
 # --- 2. LAYOUT & NAVIGATION ---
@@ -96,17 +92,14 @@ if menu == "1. Mahlzeit erfassen":
                 st.info(f"📋 **Referenz:** {std_menge} ≈ {k_ref} kcal")
                 menge = st.number_input(f"Anzahl / Menge ({std_menge}):", min_value=0.0, step=0.5, value=1.0)
                 basis = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"])
-                
-                # Berechnung
                 gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
                 kcal_total = (k100 / 100) * gewicht
-                
                 st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal")
                 
                 if st.button("💾 In Logbuch speichern"):
                     heute = datetime.now().strftime("%Y-%m-%d")
                     speichere_zeile_gs([heute, p_wahl, m_zeit, lebensmittel_wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
-                    st.success(f"Gespeichert!")
+                    st.success(f"Eintrag gespeichert!")
 
 # --- MODUL 2: DASHBOARD ---
 elif menu == "2. Patienten-Dashboard":
@@ -160,4 +153,52 @@ elif menu == "2. Patienten-Dashboard":
                 neu_date = st.date_input("Wiegedatum:", value=datetime.now())
                 neu_w = st.number_input("Gewicht (kg):", step=0.1)
                 if st.button("Gewicht speichern"):
-                    speichere_zeile_gs([str(neu_date), p_wahl, neu_w], "gewichts
+                    speichere_zeile_gs([str(neu_date), p_wahl, neu_w], "gewichtsverlauf")
+                    st.rerun()
+
+# --- MODUL 3: PATIENTENVERWALTUNG ---
+elif menu == "3. Patientenverwaltung":
+    st.header("👥 Patientenverwaltung")
+    df_p = lade_daten_gs("patienten")
+    t_list, t_new, t_copy, t_del = st.tabs(["📋 Liste", "➕ Neu", "👯 Kopieren", "🗑️ Löschen"])
+    
+    with t_list:
+        if not df_p.empty: st.dataframe(df_p, use_container_width=True, hide_index=True)
+    
+    with t_new:
+        with st.form("p_new"):
+            n = st.text_input("Name")
+            z = st.number_input("Ziel Kcal", value=2000)
+            if st.form_submit_button("Speichern"):
+                heute = datetime.now().strftime("%Y-%m-%d")
+                new_p = pd.DataFrame([[n, z, "", "", 165, "P25", 0, heute]], columns=df_p.columns)
+                df_p = pd.concat([df_p, new_p], ignore_index=True)
+                speichere_df_gs(df_p, "patienten")
+                st.rerun()
+
+    with t_copy:
+        if not df_p.empty:
+            p_vorlage = st.selectbox("Vorlage:", df_p["Name"])
+            v_data = df_p[df_p["Name"] == p_vorlage].iloc[0]
+            new_name = st.text_input("Neuer Name")
+            if st.button("Kopie erstellen"):
+                heute = datetime.now().strftime("%Y-%m-%d")
+                new_p = pd.DataFrame([[new_name, v_data['Ziel_Kcal'], v_data['Geschlecht'], v_data['Geburtsdatum'], v_data['Groesse_cm'], v_data['Ziel_Perzentile'], 0, heute]], columns=df_p.columns)
+                df_p = pd.concat([df_p, new_p], ignore_index=True)
+                speichere_df_gs(df_p, "patienten")
+                st.rerun()
+
+    with t_del:
+        if not df_p.empty:
+            p_kill = st.selectbox("Patient löschen:", df_p["Name"])
+            if st.button(f"Unwiderruflich löschen: {p_kill}", type="primary"):
+                df_p = df_p[df_p["Name"] != p_kill]
+                speichere_df_gs(df_p, "patienten")
+                st.rerun()
+
+# --- MODUL 4: DATENBANK INFO ---
+elif menu == "4. Datenbank-Info":
+    st.header("📊 Lebensmittel-Übersicht")
+    df_db = lade_daten_gs("lebensmittel")
+    if not df_db.empty:
+        st.dataframe(df_db, use_container_width=True, hide_index=True)
