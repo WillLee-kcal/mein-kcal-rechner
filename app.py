@@ -221,91 +221,73 @@ elif menu == "2. Dashboard":
             else:
                 st.write("Heute wurden noch keine Mahlzeiten eingetragen.")
 
-# --- MODUL 3: PATIENTENVERWALTUNG (BIOMETRIE-UPDATE) ---
-elif menu == "3. Patientenverwaltung":
-    st.header("👥 Patientenverwaltung & Biometrie")
+# --- MODUL 2: DASHBOARD (PROFI-EDITION) ---
+elif menu == "2. Dashboard":
+    st.header("📊 Therapie-Dashboard")
+    df_v = lade_daten_gs("verzehr")
     df_p = lade_daten_gs("patienten")
     
-    t_liste, t_neu, t_edit = st.tabs(["📋 Liste", "➕ Neu anlegen", "✏️ Wiegen & Anpassen"])
+    if df_p.empty:
+        st.info("Bitte zuerst Patienten anlegen.")
+    else:
+        p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
+        p_data = df_p[df_p["Name"] == p_wahl].iloc[0]
+        
+        # --- BIOMETRIE & STATUS-AMPEL ---
+        st.subheader("🧬 Biometrischer Status")
+        
+        # Daten bereinigen
+        w = pd.to_numeric(p_data.get("Gewicht_aktuell", 0), errors='coerce')
+        h = pd.to_numeric(p_data.get("Groesse_cm", 0), errors='coerce')
+        bmi = round(w / ((h/100)**2), 1) if h > 0 else 0
+        
+        col1, col2, col3 = st.columns([1, 1, 2])
+        col1.metric("BMI", f"{bmi}")
+        col2.metric("Ziel", p_data.get("Ziel_Perzentile", "N/A"))
+        
+        # BMI Ampel (Einfache Einordnung)
+        if bmi > 0:
+            if bmi < 18.5:
+                col3.error(f"Status: Untergewicht (Ziel: {p_data.get('Ziel_Perzentile')})")
+            elif bmi < 25:
+                col3.success("Status: Normalgewicht")
+            else:
+                col3.warning("Status: Übergewicht")
 
-    # --- TAB: LISTE ---
-    # --- TAB: LISTE ---
-    with t_liste:
-        if not df_p.empty:
-            # Sicherheits-Kopie erstellen
-            df_display = df_p.copy()
-            
-            # 1. Sicherstellen, dass alle benötigten Spalten da sind
-            for col in ["Gewicht_aktuell", "Groesse_cm", "Ziel_Kcal"]:
-                if col not in df_display.columns:
-                    df_display[col] = 0
-            
-            # 2. Daten in Zahlen umwandeln (Fehler werden zu NaN/leer, dann zu 0)
-            df_display["Gewicht_aktuell"] = pd.to_numeric(df_display["Gewicht_aktuell"], errors='coerce').fillna(0)
-            df_display["Groesse_cm"] = pd.to_numeric(df_display["Groesse_cm"], errors='coerce').fillna(0)
-            
-            # 3. BMI berechnen (nur wenn Größe > 0)
-            def berechne_bmi(row):
-                w = row["Gewicht_aktuell"]
-                h = row["Groesse_cm"]
-                if h > 0 and w > 0:
-                    return round(w / ((h / 100) ** 2), 1)
-                return 0
+        st.divider()
 
-            df_display["BMI"] = df_display.apply(berechne_bmi, axis=1)
-            
-            # Anzeige der Tabelle
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        # --- KALORIEN-CHECK & LÖSCHFUNKTION ---
+        heute = datetime.now().strftime("%Y-%m-%d")
+        df_v["Datum"] = df_v["Datum"].astype(str)
+        df_heute = df_v[(df_v["Datum"] == heute) & (df_v["Patient"] == p_wahl)]
+        
+        gegessen = df_heute["Kcal_Gesamt"].sum()
+        ziel = float(p_data["Ziel_Kcal"])
+        
+        st.subheader(f"🍴 Kalorien heute: {gegessen:.0f} / {ziel:.0f} kcal")
+        st.progress(min(gegessen/ziel, 1.0) if ziel > 0 else 0)
+
+        # Mahlzeiten auflisten mit Lösch-Option
+        if not df_heute.empty:
+            with st.expander("Heutige Einträge bearbeiten"):
+                st.write("Hier kannst du fehlerhafte Einträge entfernen:")
+                for i, row in df_heute.iterrows():
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(f"**{row['Lebensmittel']}**: {row['Kcal_Gesamt']:.0f} kcal ({row['Menge_g']:.0g}g)")
+                    if c2.button("Löschen", key=f"del_{i}"):
+                        # Den Eintrag aus dem Haupt-DF löschen
+                        full_df = lade_daten_gs("verzehr")
+                        # Wir löschen genau die Zeile (Index-basiert ist im Web schwer, daher filtern wir)
+                        full_df = full_df.drop(i) 
+                        speichere_df_gs(full_df, "verzehr")
+                        st.success("Eintrag gelöscht!")
+                        st.rerun()
         else:
-            st.info("Noch keine Patienten vorhanden.")
-    # --- TAB: NEU ANLEGEN ---
-    with t_neu:
-        with st.form("p_neu_full"):
-            c1, c2 = st.columns(2)
-            with c1:
-                n = st.text_input("Name")
-                g = st.selectbox("Geschlecht", ["weiblich", "männlich"])
-                geb = st.date_input("Geburtsdatum", value=datetime(2010, 1, 1))
-            with c2:
-                w = st.number_input("Aktuelles Gewicht (kg)", value=50.0, step=0.1)
-                h = st.number_input("Größe (cm)", value=160)
-                perz = st.selectbox("Ziel-Perzentile", ["P3", "P10", "P25", "P50", "P75", "P90"])
-            
-            z = st.number_input("Kalorienziel (kcal)", value=2000)
-            
-            if st.form_submit_button("Patient inkl. Biometrie anlegen"):
-                heute = datetime.now().strftime("%Y-%m-%d")
-                new_data = pd.DataFrame([[n, z, g, str(geb), h, perz, w, heute]], 
-                                        columns=["Name", "Ziel_Kcal", "Geschlecht", "Geburtsdatum", "Groesse_cm", "Ziel_Perzentile", "Gewicht_aktuell", "Wiegedatum"])
-                df_p = pd.concat([df_p, new_data], ignore_index=True)
-                speichere_df_gs(df_p, "patienten")
-                st.success(f"{n} erfolgreich angelegt!")
-                st.rerun()
+            st.info("Noch keine Mahlzeiten für heute eingetragen.")
 
-    # --- TAB: WIEGEN & ANPASSEN ---
-    with t_edit:
-        if not df_p.empty:
-            edit_n = st.selectbox("Patient wählen:", df_p["Name"])
-            idx = df_p[df_p["Name"] == edit_n].index[0]
-            
-            st.subheader(f"Daten für {edit_n} aktualisieren")
-            col1, col2 = st.columns(2)
-            with col1:
-                new_w = st.number_input("Neues Gewicht (kg)", value=float(df_p.at[idx, "Gewicht_aktuell"]) if "Gewicht_aktuell" in df_p.columns else 50.0)
-                new_h = st.number_input("Größe (cm)", value=int(df_p.at[idx, "Groesse_cm"]))
-            with col2:
-                new_z = st.number_input("Kalorienziel (kcal)", value=int(df_p.at[idx, "Ziel_Kcal"]))
-                new_perz = st.selectbox("Ziel-Perzentile", ["P3", "P10", "P25", "P50", "P75", "P90"], index=2)
-
-            if st.button("Wiegedaten & Ziel speichern"):
-                df_p.at[idx, "Gewicht_aktuell"] = new_w
-                df_p.at[idx, "Groesse_cm"] = new_h
-                df_p.at[idx, "Ziel_Kcal"] = new_z
-                df_p.at[idx, "Ziel_Perzentile"] = new_perz
-                df_p.at[idx, "Wiegedatum"] = datetime.now().strftime("%Y-%m-%d")
-                speichere_df_gs(df_p, "patienten")
-                st.success("Biometrie aktualisiert!")
-                st.rerun()
+        # Visualisierung
+        chart_data = pd.DataFrame({"Typ": ["Gegessen", "Ziel"], "kcal": [gegessen, ziel]})
+        st.bar_chart(chart_data, x="Typ", y="kcal")
                 
 # --- MODUL 4: DATENBANK BEARBEITEN (Mit Typ-Auswahl) ---
 elif menu == "4. Datenbank bearbeiten":
@@ -333,6 +315,7 @@ elif menu == "4. Datenbank bearbeiten":
                 df_db = pd.concat([df_db, new_row], ignore_index=True)
                 speichere_df_gs(df_db, "lebensmittel")
                 st.rerun()
+
 
 
 
