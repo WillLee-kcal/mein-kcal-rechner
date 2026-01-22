@@ -214,21 +214,102 @@ elif menu == "3. Patientenverwaltung":
                     speichere_df_gs(df_p, "patienten")
                     st.rerun()
 
-# --- MODUL 4: DATENBANK ---
+# --- MODUL 4: DATENBANK-ZENTRALE (ERWEITERT) ---
 elif menu == "4. Datenbank bearbeiten":
-    st.header("📊 Lebensmittel")
+    st.header("📊 Lebensmittel-Stammdaten")
     df_db = lade_daten_gs("lebensmittel")
-    if not df_db.empty:
-        st.dataframe(df_db, use_container_width=True)
-    with st.expander("Neu hinzufügen"):
-        with st.form("f_add"):
-            ft = st.selectbox("Typ", ["Intern", "Extern"])
-            fn = st.text_input("Name")
-            fk = st.number_input("Kcal/100g")
-            fg = st.number_input("Stückgewicht (g)")
-            fs = st.text_input("Standardmenge")
-            if st.form_submit_button("Hinzufügen"):
-                new_f = pd.DataFrame([[fn, fk, fg, fs, ft]], columns=["Name", "kcal_100g", "stueck_gewicht", "Standard_Menge", "Typ"])
-                df_db = pd.concat([df_db, new_f], ignore_index=True)
-                speichere_df_gs(df_db, "lebensmittel")
-                st.rerun()
+    
+    if df_db.empty:
+        st.error("Datenbank konnte nicht geladen werden oder ist leer.")
+    else:
+        # Tabs für die Verwaltung
+        tab_view, tab_add, tab_edit = st.tabs([
+            "📋 Alle Lebensmittel", 
+            "➕ Neu hinzufügen", 
+            "✏️ Bearbeiten / Löschen"
+        ])
+
+        # --- TAB 1: ANSICHT & SUCHE ---
+        with tab_view:
+            col_search, col_filter = st.columns([2, 1])
+            with col_search:
+                suche_db = st.text_input("Datenbank durchsuchen:", placeholder="z.B. Brot...")
+            with col_filter:
+                filter_typ = st.selectbox("Typ filtern:", ["Alle", "Intern", "Extern"])
+            
+            df_display = df_db.copy()
+            if filter_typ != "Alle":
+                df_display = df_display[df_display['Typ'] == filter_typ]
+            if suche_db:
+                df_display = df_display[df_display['Name'].str.contains(suche_db, case=False, na=False)]
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            st.info(f"Anzahl Einträge: {len(df_display)}")
+
+        # --- TAB 2: NEU HINZUFÜGEN ---
+        with tab_add:
+            st.subheader("Neues Lebensmittel anlegen")
+            with st.form("form_add_food"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    new_name = st.text_input("Name des Lebensmittels:")
+                    new_typ = st.selectbox("Kategorie:", ["Intern", "Extern"])
+                    new_std = st.text_input("Standardmenge (z.B. '1 Scheibe' oder '1 Becher'):")
+                with c2:
+                    new_kcal = st.number_input("Kcal pro 100g:", min_value=0.0, step=1.0)
+                    new_stk = st.number_input("Stückgewicht in Gramm (falls Einheit):", min_value=0.0, step=1.0)
+                
+                if st.form_submit_button("In Datenbank speichern"):
+                    if new_name:
+                        # Als neue Zeile ans Google Sheet schicken
+                        new_row = [new_name, new_kcal, new_stk, new_std, new_typ]
+                        speichere_zeile_gs(new_row, "lebensmittel")
+                        st.success(f"'{new_name}' wurde hinzugefügt!")
+                        st.rerun()
+                    else:
+                        st.error("Bitte einen Namen angeben.")
+
+        # --- TAB 3: BEARBEITEN / LÖSCHEN ---
+        with tab_edit:
+            st.subheader("Eintrag korrigieren oder entfernen")
+            # Auswahl des zu bearbeitenden Lebensmittels
+            food_to_edit = st.selectbox("Lebensmittel auswählen:", df_db["Name"].sort_values())
+            
+            if food_to_edit:
+                # Aktuelle Daten laden
+                idx = df_db[df_db["Name"] == food_to_edit].index[0]
+                row = df_db.iloc[idx]
+                
+                with st.form("form_edit_food"):
+                    e_col1, e_col2 = st.columns(2)
+                    with e_col1:
+                        edit_name = st.text_input("Name:", value=row["Name"])
+                        edit_typ = st.selectbox("Typ:", ["Intern", "Extern"], 
+                                               index=0 if row["Typ"] == "Intern" else 1)
+                        edit_std = st.text_input("Standardmenge:", value=row["Standard_Menge"])
+                    with e_col2:
+                        edit_kcal = st.number_input("Kcal/100g:", value=float(row["kcal_100g"]))
+                        edit_stk = st.number_input("Stückgewicht (g):", value=float(row["stueck_gewicht"]))
+                    
+                    c_btn1, c_btn2 = st.columns(2)
+                    with c_btn1:
+                        if st.form_submit_button("💾 Änderungen speichern"):
+                            df_db.at[idx, "Name"] = edit_name
+                            df_db.at[idx, "kcal_100g"] = edit_kcal
+                            df_db.at[idx, "stueck_gewicht"] = edit_stk
+                            df_db.at[idx, "Standard_Menge"] = edit_std
+                            df_db.at[idx, "Typ"] = edit_typ
+                            speichere_df_gs(df_db, "lebensmittel")
+                            st.success("Daten wurden aktualisiert!")
+                            st.rerun()
+                    
+                    with c_btn2:
+                        # Separater Lösch-Button außerhalb des Forms (oder als spezieller Submit)
+                        st.write("---")
+                
+                # Löschen außerhalb des Forms für Sicherheit
+                if st.button(f"🗑️ '{food_to_edit}' endgültig löschen", type="primary"):
+                    df_db = df_db.drop(idx)
+                    speichere_df_gs(df_db, "lebensmittel")
+                    st.success("Eintrag gelöscht.")
+                    st.rerun()
