@@ -35,6 +35,7 @@ def lade_daten_gs_cached(sheet_name):
             sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
+            # Spaltennamen bereinigen (Leerzeichen weg)
             df.columns = df.columns.str.strip()
             return df
         except: return pd.DataFrame()
@@ -86,7 +87,13 @@ if menu == "1. Mahlzeit erfassen":
             item = df_db[df_db['Name'] == lebensmittel_wahl].iloc[0]
             k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
             stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
-            k_ref = pd.to_numeric(item.get('kcal_pro_Einheit', 0), errors='coerce') or 0
+            # Flexible Suche nach der Kcal-Spalte
+            k_ref = 0
+            for col in ["kcal_pro_Einheit", "Kcal_pro_Einheit", "kcal_pro_einheit"]:
+                if col in item:
+                    k_ref = pd.to_numeric(item[col], errors='coerce') or 0
+                    break
+            
             std_menge = item.get('Standard_Menge', '1 Stück')
 
             with c2:
@@ -185,20 +192,36 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-# --- MODUL 4: DATENBANK (VOLL EDITIERBAR MIT TYP-FIX) ---
+# --- MODUL 4: DATENBANK (ROBUSTER EDITOR) ---
 elif menu == "4. Datenbank (Editierbar)":
     st.header("📊 Lebensmittel-Datenbank Editor")
-    
     df_db = lade_daten_gs("lebensmittel")
     
     if not df_db.empty:
-        # --- WICHTIG: DATENTYPEN ERZWINGEN ---
-        # Ohne diesen Schritt lässt der Editor keine Eingabe in Zahlenfeldern zu
-        df_db["kcal_100g"] = pd.to_numeric(df_db["kcal_100g"], errors='coerce').fillna(0)
-        df_db["stueck_gewicht"] = pd.to_numeric(df_db["stueck_gewicht"], errors='coerce').fillna(0)
-        df_db["kcal_pro_Einheit"] = pd.to_numeric(df_db["kcal_pro_Einheit"], errors='coerce').fillna(0)
+        # Sicherheits-Check für Spaltennamen (Casing-Schutz)
+        # Wir suchen die Spalte und benennen sie ggf. einheitlich um
+        cols_aktuell = df_db.columns.tolist()
+        mapping = {
+            "kcal_100g": "kcal_100g",
+            "stueck_gewicht": "stueck_gewicht",
+            "kcal_pro_Einheit": "kcal_pro_Einheit"
+        }
+        
+        # Falls Spalten klein geschrieben sind, finden wir sie hier
+        for c in cols_aktuell:
+            if c.lower() == "kcal_pro_einheit": mapping["kcal_pro_Einheit"] = c
+            if c.lower() == "kcal_100g": mapping["kcal_100g"] = c
+            if c.lower() == "stueck_gewicht": mapping["stueck_gewicht"] = c
 
-        st.info("💡 Klicke doppelt in eine Zelle, um den Wert zu ändern. Neue Zeilen am Ende hinzufügen.")
+        # Zahlen-Konvertierung
+        for key, real_col in mapping.items():
+            if real_col in df_db.columns:
+                df_db[real_col] = pd.to_numeric(df_db[real_col], errors='coerce').fillna(0)
+            else:
+                # Falls Spalte komplett fehlt, legen wir sie leer an
+                df_db[key] = 0.0
+
+        st.info("💡 Klicke doppelt zum Editieren. Änderungen müssen gespeichert werden.")
         
         edited_df = st.data_editor(
             df_db, 
@@ -206,11 +229,10 @@ elif menu == "4. Datenbank (Editierbar)":
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Name": st.column_config.TextColumn("Bezeichnung", required=True),
-                "kcal_100g": st.column_config.NumberColumn("kcal/100g", min_value=0, format="%f"),
-                "stueck_gewicht": st.column_config.NumberColumn("Gewicht (g)", min_value=0, format="%f"),
-                "kcal_pro_Einheit": st.column_config.NumberColumn("kcal/Einheit", min_value=0, format="%f"),
-                "Standard_Menge": st.column_config.TextColumn("Einheit (Text)"),
+                "Name": st.column_config.TextColumn("Bezeichnung"),
+                mapping.get("kcal_100g", "kcal_100g"): st.column_config.NumberColumn("kcal/100g", format="%.1f"),
+                mapping.get("stueck_gewicht", "stueck_gewicht"): st.column_config.NumberColumn("Gewicht (g)", format="%.1f"),
+                mapping.get("kcal_pro_Einheit", "kcal_pro_Einheit"): st.column_config.NumberColumn("kcal/Einheit", format="%.1f"),
                 "Typ": st.column_config.SelectboxColumn("Typ", options=["Intern", "Extern"])
             },
             key="db_full_editor"
@@ -219,7 +241,7 @@ elif menu == "4. Datenbank (Editierbar)":
         if st.button("💾 Alle Änderungen in Google Sheets speichern"):
             with st.spinner("Synchronisiere Datenbank..."):
                 speichere_df_gs(edited_df, "lebensmittel")
-                st.success("Die Datenbank wurde aktualisiert!")
+                st.success("Erfolgreich aktualisiert!")
                 st.rerun()
     else:
         st.error("Datenbank konnte nicht geladen werden.")
