@@ -181,79 +181,85 @@ elif menu == "2. Dashboard (Grafik)":
         chart_data = pd.DataFrame({"Kategorie": ["Gegessen", "Ziel"], "Kcal": [gegessen, ziel]})
         st.bar_chart(chart_data, x="Kategorie", y="Kcal")
 
-# --- MODUL 3: PATIENTENVERWALTUNG (ERWEITERT) ---
+# --- MODUL 3: PATIENTENVERWALTUNG (PROFI-VERSION) ---
 elif menu == "3. Patientenverwaltung":
-    st.header("👥 Patientenverwaltung & Stammdaten")
+    st.header("👥 Patientenverwaltung & Biometrie")
     df_p = lade_daten_gs("patienten")
     
-    # Tabs für bessere Übersicht
-    tab_liste, tab_neu, tab_bearbeiten, tab_loeschen = st.tabs([
-        "📋 Patientenliste", 
-        "➕ Neu anlegen", 
-        "✏️ Ziel anpassen", 
-        "🗑️ Entlassen/Löschen"
+    t_liste, t_neu, t_edit, t_del = st.tabs([
+        "📋 Patientenliste", "➕ Neu anlegen", "✏️ Daten anpassen", "🗑️ Löschen"
     ])
 
-    # --- TAB 1: LISTE & SUCHE ---
-    with tab_liste:
+    # --- TAB 1: LISTE (Inkl. BMI-Berechnung) ---
+    with t_liste:
         if not df_p.empty:
-            suche_p = st.text_input("Patient suchen:", placeholder="Name eingeben...")
-            if suche_p:
-                df_anzeige = df_p[df_p['Name'].str.contains(suche_p, case=False, na=False)]
-            else:
-                df_anzeige = df_p
-            
-            st.dataframe(df_anzeige, use_container_width=True, hide_index=True)
-            st.info(f"Anzahl registrierter Patienten: {len(df_p)}")
+            # Falls Spalten fehlen, leere Werte ergänzen (Schutz vor Absturz)
+            for col in ["Geschlecht", "Geburtsdatum", "Groesse_cm", "Ziel_Perzentile"]:
+                if col not in df_p.columns: df_p[col] = ""
+
+            st.dataframe(df_p, use_container_width=True, hide_index=True)
         else:
-            st.write("Noch keine Patienten registriert.")
+            st.info("Noch keine Patienten vorhanden.")
 
     # --- TAB 2: NEU ANLEGEN ---
-    with tab_neu:
-        with st.form("form_p_neu"):
-            n_name = st.text_input("Vollständiger Name:")
-            n_ziel = st.number_input("Tagesziel (kcal):", min_value=500, max_value=5000, value=2000, step=50)
-            submit_n = st.form_submit_button("Patient registrieren")
+    with t_neu:
+        with st.form("p_neu_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_n = st.text_input("Vollständiger Name")
+                new_g = st.selectbox("Geschlecht", ["weiblich", "männlich", "divers"])
+                new_birth = st.date_input("Geburtsdatum", value=datetime(2010, 1, 1))
+            with col2:
+                new_z = st.number_input("Tagesziel (kcal)", value=2000, step=50)
+                new_h = st.number_input("Größe (in cm)", value=160)
+                new_perz = st.text_input("Ziel-Perzentile (z.B. P25)", "P25")
             
-            if submit_n:
-                if n_name and n_name not in df_p['Name'].values:
-                    # Neue Zeile erstellen
-                    neu_p = pd.DataFrame([[n_name, n_ziel]], columns=["Name", "Ziel_Kcal"])
-                    df_p = pd.concat([df_p, neu_p], ignore_index=True)
+            if st.form_submit_button("Patient speichern"):
+                if new_n:
+                    new_data = pd.DataFrame([[
+                        new_n, new_z, new_g, str(new_birth), new_h, new_perz
+                    ]], columns=["Name", "Ziel_Kcal", "Geschlecht", "Geburtsdatum", "Groesse_cm", "Ziel_Perzentile"])
+                    
+                    df_p = pd.concat([df_p, new_data], ignore_index=True)
                     speichere_df_gs(df_p, "patienten")
-                    st.success(f"Patient {n_name} wurde erfolgreich angelegt!")
+                    st.success(f"Patient {new_n} angelegt!")
                     st.rerun()
-                else:
-                    st.error("Name fehlt oder Patient existiert bereits.")
 
-    # --- TAB 3: ZIEL ANPASSEN (BEARBEITEN) ---
-    with tab_bearbeiten:
+    # --- TAB 3: DATEN ANPASSEN ---
+    with t_edit:
         if not df_p.empty:
-            p_edit = st.selectbox("Welchen Patienten bearbeiten?", df_p["Name"], key="edit_select")
-            aktuelles_ziel = df_p.loc[df_p["Name"] == p_edit, "Ziel_Kcal"].values[0]
+            edit_n = st.selectbox("Patient wählen:", df_p["Name"])
+            p_idx = df_p[df_p["Name"] == edit_n].index[0]
             
-            neues_ziel = st.number_input(f"Neues Ziel für {p_edit}:", value=int(aktuelles_ziel), step=50)
+            # Bestehende Werte laden
+            curr_z = df_p.at[p_idx, "Ziel_Kcal"]
+            curr_h = df_p.at[p_idx, "Groesse_cm"] if "Groesse_cm" in df_p.columns else 160
+            curr_perz = df_p.at[p_idx, "Ziel_Perzentile"] if "Ziel_Perzentile" in df_p.columns else "P25"
             
-            if st.button("Änderung speichern"):
-                df_p.loc[df_p["Name"] == p_edit, "Ziel_Kcal"] = neues_ziel
+            col1, col2 = st.columns(2)
+            with col1:
+                up_z = st.number_input("Ziel (kcal) ändern:", value=int(curr_z))
+                up_h = st.number_input("Größe (cm) ändern:", value=int(curr_h) if curr_h else 160)
+            with col2:
+                up_perz = st.text_input("Ziel-Perzentile ändern:", value=str(curr_perz))
+                
+            if st.button("Änderungen übernehmen"):
+                df_p.at[p_idx, "Ziel_Kcal"] = up_z
+                df_p.at[p_idx, "Groesse_cm"] = up_h
+                df_p.at[p_idx, "Ziel_Perzentile"] = up_perz
                 speichere_df_gs(df_p, "patienten")
-                st.success(f"Ziel für {p_edit} auf {neues_ziel} kcal aktualisiert!")
-                st.rerun()
-        else:
-            st.write("Keine Daten zum Bearbeiten vorhanden.")
-
-    # --- TAB 4: LÖSCHEN / ENTLASSEN ---
-    with tab_loeschen:
-        if not df_p.empty:
-            p_del = st.selectbox("Welchen Patienten entlassen?", df_p["Name"], key="del_select")
-            st.warning(f"Achtung: Das Löschen von {p_del} kann nicht rückgängig gemacht werden.")
-            
-            if st.button(f"{p_del} unwiderruflich löschen"):
-                df_p = df_p[df_p["Name"] != p_del]
-                speichere_df_gs(df_p, "patienten")
-                st.success(f"Patient {p_del} wurde aus dem System entfernt.")
+                st.success("Daten aktualisiert!")
                 st.rerun()
 
+    # --- TAB 4: LÖSCHEN ---
+    with t_del:
+        if not df_p.empty:
+            del_n = st.selectbox("Patient unwiderruflich löschen:", df_p["Name"])
+            if st.button(f"Lösche {del_n}", type="primary"):
+                df_p = df_p[df_p["Name"] != del_n]
+                speichere_df_gs(df_p, "patienten")
+                st.rerun()
+                
 # --- MODUL 4: DATENBANK BEARBEITEN (Mit Typ-Auswahl) ---
 elif menu == "4. Datenbank bearbeiten":
     st.header("📊 Datenbank")
@@ -280,4 +286,5 @@ elif menu == "4. Datenbank bearbeiten":
                 df_db = pd.concat([df_db, new_row], ignore_index=True)
                 speichere_df_gs(df_db, "lebensmittel")
                 st.rerun()
+
 
