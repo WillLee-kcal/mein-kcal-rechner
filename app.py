@@ -185,15 +185,21 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-# --- MODUL 4: DATENBANK (VOLL EDITIERBAR) ---
+# --- MODUL 4: DATENBANK (VOLL EDITIERBAR MIT TYP-FIX) ---
 elif menu == "4. Datenbank (Editierbar)":
     st.header("📊 Lebensmittel-Datenbank Editor")
-    st.info("💡 Bearbeite Name, Kcal oder Gewichte direkt in der Tabelle. Neue Lebensmittel kannst du in der untersten Zeile hinzufügen.")
     
     df_db = lade_daten_gs("lebensmittel")
     
     if not df_db.empty:
-        # Konfiguration der Spalten für bessere Bedienung
+        # --- WICHTIG: DATENTYPEN ERZWINGEN ---
+        # Ohne diesen Schritt lässt der Editor keine Eingabe in Zahlenfeldern zu
+        df_db["kcal_100g"] = pd.to_numeric(df_db["kcal_100g"], errors='coerce').fillna(0)
+        df_db["stueck_gewicht"] = pd.to_numeric(df_db["stueck_gewicht"], errors='coerce').fillna(0)
+        df_db["kcal_pro_Einheit"] = pd.to_numeric(df_db["kcal_pro_Einheit"], errors='coerce').fillna(0)
+
+        st.info("💡 Klicke doppelt in eine Zelle, um den Wert zu ändern. Neue Zeilen am Ende hinzufügen.")
+        
         edited_df = st.data_editor(
             df_db, 
             num_rows="dynamic", 
@@ -201,9 +207,9 @@ elif menu == "4. Datenbank (Editierbar)":
             hide_index=True,
             column_config={
                 "Name": st.column_config.TextColumn("Bezeichnung", required=True),
-                "kcal_100g": st.column_config.NumberColumn("kcal/100g", min_value=0, format="%d"),
-                "stueck_gewicht": st.column_config.NumberColumn("Gewicht (g)", min_value=0, format="%d"),
-                "kcal_pro_Einheit": st.column_config.NumberColumn("kcal/Einheit", min_value=0, format="%d"),
+                "kcal_100g": st.column_config.NumberColumn("kcal/100g", min_value=0, format="%f"),
+                "stueck_gewicht": st.column_config.NumberColumn("Gewicht (g)", min_value=0, format="%f"),
+                "kcal_pro_Einheit": st.column_config.NumberColumn("kcal/Einheit", min_value=0, format="%f"),
                 "Standard_Menge": st.column_config.TextColumn("Einheit (Text)"),
                 "Typ": st.column_config.SelectboxColumn("Typ", options=["Intern", "Extern"])
             },
