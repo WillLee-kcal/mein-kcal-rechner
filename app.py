@@ -229,16 +229,35 @@ elif menu == "3. Patientenverwaltung":
     t_liste, t_neu, t_edit = st.tabs(["📋 Liste", "➕ Neu anlegen", "✏️ Wiegen & Anpassen"])
 
     # --- TAB: LISTE ---
+    # --- TAB: LISTE ---
     with t_liste:
         if not df_p.empty:
-            # BMI live berechnen für die Liste
+            # Sicherheits-Kopie erstellen
             df_display = df_p.copy()
-            if "Gewicht_aktuell" in df_display.columns and "Groesse_cm" in df_display.columns:
-                df_display["BMI"] = df_display.apply(lambda r: round(r["Gewicht_aktuell"] / ((r["Groesse_cm"]/100)**2), 1) if r["Groesse_cm"] > 0 else 0, axis=1)
+            
+            # 1. Sicherstellen, dass alle benötigten Spalten da sind
+            for col in ["Gewicht_aktuell", "Groesse_cm", "Ziel_Kcal"]:
+                if col not in df_display.columns:
+                    df_display[col] = 0
+            
+            # 2. Daten in Zahlen umwandeln (Fehler werden zu NaN/leer, dann zu 0)
+            df_display["Gewicht_aktuell"] = pd.to_numeric(df_display["Gewicht_aktuell"], errors='coerce').fillna(0)
+            df_display["Groesse_cm"] = pd.to_numeric(df_display["Groesse_cm"], errors='coerce').fillna(0)
+            
+            # 3. BMI berechnen (nur wenn Größe > 0)
+            def berechne_bmi(row):
+                w = row["Gewicht_aktuell"]
+                h = row["Groesse_cm"]
+                if h > 0 and w > 0:
+                    return round(w / ((h / 100) ** 2), 1)
+                return 0
+
+            df_display["BMI"] = df_display.apply(berechne_bmi, axis=1)
+            
+            # Anzeige der Tabelle
             st.dataframe(df_display, use_container_width=True, hide_index=True)
         else:
             st.info("Noch keine Patienten vorhanden.")
-
     # --- TAB: NEU ANLEGEN ---
     with t_neu:
         with st.form("p_neu_full"):
@@ -314,6 +333,7 @@ elif menu == "4. Datenbank bearbeiten":
                 df_db = pd.concat([df_db, new_row], ignore_index=True)
                 speichere_df_gs(df_db, "lebensmittel")
                 st.rerun()
+
 
 
 
