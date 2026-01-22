@@ -47,21 +47,17 @@ menu = st.sidebar.radio("Menü wählen:", [
     "4. Datenbank bearbeiten"
 ])
 
-# --- MODUL 1: MAHLZEIT ERFASSEN ---
+# --- MODUL 1: MAHLZEIT ERFASSEN (Optimiert für Mengen) ---
 if menu == "1. Mahlzeit & Logbuch":
     st.header("⚖️ Mahlzeit berechnen & speichern")
     df_db = lade_daten_gs("lebensmittel")
     df_p = lade_daten_gs("patienten")
     
-    if df_p.empty:
-        st.warning("Bitte lege zuerst unter Punkt 3 einen Patienten an.")
-    elif df_db.empty:
-        st.warning("Bitte fülle zuerst deine Lebensmittel-Datenbank in Punkt 4.")
-    else:
+    if not df_p.empty and not df_db.empty:
         col_a, col_b = st.columns(2)
         with col_a:
             p_wahl = st.selectbox("Für welchen Patienten?", df_p["Name"])
-            suche = st.text_input("Lebensmittel suchen (Name eingeben):")
+            suche = st.text_input("Lebensmittel suchen:")
         
         if suche:
             treffer = df_db[df_db['Name'].str.contains(suche, case=False, na=False)]
@@ -69,21 +65,28 @@ if menu == "1. Mahlzeit & Logbuch":
                 wahl = st.selectbox("Gefunden:", treffer['Name'])
                 item = df_db[df_db['Name'] == wahl].iloc[0]
                 
+                # Anzeige der Standard-Menge aus deiner Vorlage
+                std_menge = item.get('Standard_Menge', 'Stück')
+                st.info(f"Info aus Vorlage: 1 Einheit entspricht ca. **{std_menge}**")
+                
                 with col_b:
-                    menge = st.number_input("Menge:", min_value=0.0, step=1.0)
-                    einheit = st.radio("Einheit:", ["Gramm", "Stück"])
+                    menge = st.number_input(f"Wie viele {einheit if einheit=='Gramm' else 'Einheiten'}?", min_value=0.0, step=1.0)
+                    einheit = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"])
                 
-                gewicht = menge * item['stueck_gewicht'] if einheit == "Stück" and item['stueck_gewicht'] else menge
-                kcal_total = (item['kcal_100g'] / 100) * gewicht
+                # Logik: Entweder Gramm direkt oder (Einheit * Stückgewicht)
+                if einheit == "Stück / Einheit":
+                    gewicht = menge * float(item['stueck_gewicht'])
+                    kcal_total = (float(item['kcal_100g']) / 100) * gewicht
+                else:
+                    gewicht = menge
+                    kcal_total = (float(item['kcal_100g']) / 100) * gewicht
                 
-                st.metric("Berechnet", f"{kcal_total:.1f} kcal")
+                st.metric("Ergebnis", f"{kcal_total:.1f} kcal", help=f"Gesamtgewicht: {gewicht}g")
                 
-                if st.button("Direkt ins Logbuch eintragen"):
+                if st.button("Ins Logbuch eintragen"):
                     heute = datetime.now().strftime("%Y-%m-%d")
-                    speichere_zeile_gs([heute, p_wahl, wahl, weight, kcal_total], "verzehr")
-                    st.success(f"Eintrag für {p_wahl} gespeichert!")
-            else:
-                st.error("Kein passendes Lebensmittel gefunden.")
+                    speichere_zeile_gs([heute, p_wahl, wahl, gewicht, kcal_total], "verzehr")
+                    st.success("Eintrag gespeichert!")
 
 # --- MODUL 2: DASHBOARD ---
 elif menu == "2. Dashboard (Grafik)":
@@ -152,3 +155,4 @@ elif menu == "4. Datenbank bearbeiten":
                 new_db = pd.concat([df_db, pd.DataFrame([[fn, fk, fs]], columns=["Name", "kcal_100g", "stueck_gewicht"])])
                 speichere_df_gs(new_db, "lebensmittel")
                 st.rerun()
+
