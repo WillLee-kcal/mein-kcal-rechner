@@ -54,7 +54,7 @@ def speichere_df_gs(df, sheet_name):
     except: st.error("Fehler beim Update.")
 
 # --- 2. LAYOUT & NAVIGATION ---
-st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="🍎")
+st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="📈")
 st.sidebar.title("🍎 Navigation")
 menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Info"])
 
@@ -66,28 +66,16 @@ if menu == "1. Mahlzeit erfassen":
     
     if not df_p.empty and not df_db.empty:
         c1, c2 = st.columns(2)
-        
         with c1:
             p_wahl = st.selectbox("1. Patient wählen:", df_p["Name"])
             m_zeit = st.selectbox("2. Mahlzeit wählen:", MAHLZEITEN_LISTE)
-            
             st.write("---")
-            # SCHNELLAUSWAHL ÜBER KATEGORIEN
             auswahl_typ = st.radio("3. Kategorie filtern:", ["Intern", "Extern", "Alle"], horizontal=True)
-            
-            # Datenbank filtern
-            if auswahl_typ == "Alle":
-                df_gefiltert = df_db
-            else:
-                df_gefiltert = df_db[df_db['Typ'] == auswahl_typ]
-            
-            # Dropdown für Lebensmittel
+            df_gefiltert = df_db if auswahl_typ == "Alle" else df_db[df_db['Typ'] == auswahl_typ]
             lebensmittel_wahl = st.selectbox("4. Lebensmittel wählen:", ["Bitte wählen..."] + list(df_gefiltert['Name'].unique()))
 
         if lebensmittel_wahl != "Bitte wählen...":
             item = df_db[df_db['Name'] == lebensmittel_wahl].iloc[0]
-            
-            # Daten laden
             k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
             stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
             k_ref = pd.to_numeric(item.get('kcal_pro_Einheit', 0), errors='coerce') or 0
@@ -95,33 +83,21 @@ if menu == "1. Mahlzeit erfassen":
 
             with c2:
                 st.info(f"📋 **Referenz:** {std_menge} ≈ {k_ref} kcal")
-                
                 menge = st.number_input(f"Anzahl / Menge ({std_menge}):", min_value=0.0, step=0.5, value=1.0)
                 basis = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"])
-                
-                # --- BERECHNUNG ---
                 gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
-                # Formel: (kcal/100g / 100) * Gewicht
                 kcal_total = (k100 / 100) * gewicht
-                
                 st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal")
                 
-                # Optional: Warnung bei starker Abweichung vom Referenzwert
-                if basis == "Stück / Einheit" and menge == 1.0 and abs(kcal_total - k_ref) > 1:
-                    st.warning(f"Abweichung: Rechnung ({kcal_total:.1f}) weicht von Referenz ({k_ref}) ab. Bitte DB prüfen.")
-
                 if st.button("💾 In Logbuch speichern"):
                     heute = datetime.now().strftime("%Y-%m-%d")
                     speichere_zeile_gs([heute, p_wahl, m_zeit, lebensmittel_wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
-                    st.success(f"{lebensmittel_wahl} wurde für {m_zeit} gespeichert!")
-    else:
-        st.warning("Bitte stelle sicher, dass Patienten und Lebensmittel in der Datenbank vorhanden sind.")
+                    st.success(f"Eintrag gespeichert!")
+    else: st.warning("Datenbanken prüfen.")
 
-
-
-# --- MODUL 2: DASHBOARD ---
+# --- MODUL 2: DASHBOARD (MIT GRAFISCHEM VERLAUF) ---
 elif menu == "2. Patienten-Dashboard":
-    st.header("📊 Therapie-Dashboard")
+    st.header("📊 Therapie-Dashboard & Verlauf")
     df_v = lade_daten_gs("verzehr")
     df_p = lade_daten_gs("patienten")
     df_g = lade_daten_gs("gewichtsverlauf")
@@ -130,7 +106,7 @@ elif menu == "2. Patienten-Dashboard":
         p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
         p_data = df_p[df_p["Name"] == p_wahl].iloc[0]
         
-        t_kcal, t_trend = st.tabs(["🍎 Kalorien heute", "📈 Gewichtsverlauf"])
+        t_kcal, t_trend = st.tabs(["🍎 Kalorien heute", "📈 Gewichtsverlauf (Grafik)"])
         
         with t_kcal:
             heute = datetime.now().strftime("%Y-%m-%d")
@@ -142,7 +118,7 @@ elif menu == "2. Patienten-Dashboard":
                 
                 col1, col2 = st.columns(2)
                 col1.metric("Heute verzehrt", f"{gegessen:.0f} kcal")
-                col2.metric("Tagesziel", f"{ziel:.0f} kcal")
+                col2.metric("Tagesziel", f"{ziel:.0f} kcal", delta=f"{int(ziel-gegessen)} kcal Rest")
                 st.progress(min(gegessen/ziel, 1.0) if ziel > 0 else 0)
                 
                 for m in MAHLZEITEN_LISTE:
@@ -160,18 +136,46 @@ elif menu == "2. Patienten-Dashboard":
                                     st.rerun()
 
         with t_trend:
+            st.subheader(f"Gewichtskurve: {p_wahl}")
             if not df_g.empty:
+                # Daten für gewählten Patienten filtern
                 df_hist = df_g[df_g["Patient"] == p_wahl].copy()
                 if not df_hist.empty:
+                    # Datum korrekt umwandeln für die Grafik
                     df_hist["Datum"] = pd.to_datetime(df_hist["Datum"])
-                    st.line_chart(df_hist.sort_values("Datum").set_index("Datum")["Gewicht"])
+                    df_hist = df_hist.sort_values("Datum") # Wichtig für korrekten Linienverlauf
+                    
+                    # Grafik anzeigen
+                    st.line_chart(df_hist.set_index("Datum")["Gewicht"])
+                    
+                    # Zusätzliche Info-Tabelle
+                    with st.expander("Tabellarische Übersicht"):
+                        st.dataframe(df_hist.sort_values("Datum", ascending=False), use_container_width=True, hide_index=True)
+                else: st.info("Noch keine Messwerte vorhanden.")
             
-            with st.expander("➕ Neues Gewicht loggen"):
-                neu_w = st.number_input("Gewicht (kg):", step=0.1)
-                if st.button("Speichern"):
-                    h_str = datetime.now().strftime("%Y-%m-%d")
-                    speichere_zeile_gs([h_str, p_wahl, neu_w], "gewichtsverlauf")
+            # Formular zum Loggen
+            st.write("---")
+            with st.form("log_weight"):
+                st.write("**Neuen Messwert eintragen**")
+                col_w1, col_w2 = st.columns(2)
+                with col_w1:
+                    mess_datum = st.date_input("Wiegedatum:", value=datetime.now())
+                with col_w2:
+                    mess_gewicht = st.number_input("Gewicht (kg):", step=0.1, format="%.1f")
+                
+                if st.form_submit_button("Gewicht speichern"):
+                    # In Verlauf speichern
+                    speichere_zeile_gs([str(mess_datum), p_wahl, mess_gewicht], "gewichtsverlauf")
+                    # Stammdaten aktualisieren
+                    df_p_full = lade_daten_gs("patienten")
+                    p_idx = df_p_full[df_p_full["Name"] == p_wahl].index[0]
+                    df_p_full.at[p_idx, "Gewicht_aktuell"] = mess_gewicht
+                    df_p_full.at[p_idx, "Wiegedatum"] = str(mess_datum)
+                    speichere_df_gs(df_p_full, "patienten")
+                    
+                    st.success(f"Messwert {mess_gewicht} kg vom {mess_datum} wurde gespeichert.")
                     st.rerun()
+
 
 # --- MODUL 3: PATIENTEN ---
 elif menu == "3. Patientenverwaltung":
@@ -198,5 +202,6 @@ elif menu == "4. Datenbank-Info":
     if not df_db.empty:
         st.write("Deine aktuelle Lebensmittel-Liste:")
         st.dataframe(df_db, use_container_width=True, hide_index=True)
+
 
 
