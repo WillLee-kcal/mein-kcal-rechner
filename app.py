@@ -58,7 +58,7 @@ st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="📈
 st.sidebar.title("🍎 Navigation")
 menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Info"])
 
-# --- MODUL 1: MAHLZEIT ERFASSEN (MIT SCHNELLAUSWAHL) ---
+# --- MODUL 1: MAHLZEIT ERFASSEN ---
 if menu == "1. Mahlzeit erfassen":
     st.header("⚖️ Mahlzeit ins Logbuch eintragen")
     df_db = lade_daten_gs("lebensmittel")
@@ -95,7 +95,7 @@ if menu == "1. Mahlzeit erfassen":
                     st.success(f"Eintrag gespeichert!")
     else: st.warning("Datenbanken prüfen.")
 
-# --- MODUL 2: DASHBOARD (MIT GRAFISCHEM VERLAUF) ---
+# --- MODUL 2: DASHBOARD ---
 elif menu == "2. Patienten-Dashboard":
     st.header("📊 Therapie-Dashboard & Verlauf")
     df_v = lade_daten_gs("verzehr")
@@ -118,7 +118,7 @@ elif menu == "2. Patienten-Dashboard":
                 
                 col1, col2 = st.columns(2)
                 col1.metric("Heute verzehrt", f"{gegessen:.0f} kcal")
-                col2.metric("Tagesziel", f"{ziel:.0f} kcal", delta=f"{int(ziel-gegessen)} kcal Rest")
+                col2.metric("Tagesziel", f"{ziel:.0f} kcal")
                 st.progress(min(gegessen/ziel, 1.0) if ziel > 0 else 0)
                 
                 for m in MAHLZEITEN_LISTE:
@@ -136,63 +136,92 @@ elif menu == "2. Patienten-Dashboard":
                                     st.rerun()
 
         with t_trend:
-            st.subheader(f"Gewichtskurve: {p_wahl}")
             if not df_g.empty:
-                # Daten für gewählten Patienten filtern
                 df_hist = df_g[df_g["Patient"] == p_wahl].copy()
                 if not df_hist.empty:
-                    # Datum korrekt umwandeln für die Grafik
                     df_hist["Datum"] = pd.to_datetime(df_hist["Datum"])
-                    df_hist = df_hist.sort_values("Datum") # Wichtig für korrekten Linienverlauf
-                    
-                    # Grafik anzeigen
+                    df_hist = df_hist.sort_values("Datum")
                     st.line_chart(df_hist.set_index("Datum")["Gewicht"])
-                    
-                    # Zusätzliche Info-Tabelle
-                    with st.expander("Tabellarische Übersicht"):
-                        st.dataframe(df_hist.sort_values("Datum", ascending=False), use_container_width=True, hide_index=True)
-                else: st.info("Noch keine Messwerte vorhanden.")
             
-            # Formular zum Loggen
-            st.write("---")
-            with st.form("log_weight"):
-                st.write("**Neuen Messwert eintragen**")
-                col_w1, col_w2 = st.columns(2)
-                with col_w1:
-                    mess_datum = st.date_input("Wiegedatum:", value=datetime.now())
-                with col_w2:
-                    mess_gewicht = st.number_input("Gewicht (kg):", step=0.1, format="%.1f")
-                
-                if st.form_submit_button("Gewicht speichern"):
-                    # In Verlauf speichern
-                    speichere_zeile_gs([str(mess_datum), p_wahl, mess_gewicht], "gewichtsverlauf")
-                    # Stammdaten aktualisieren
-                    df_p_full = lade_daten_gs("patienten")
-                    p_idx = df_p_full[df_p_full["Name"] == p_wahl].index[0]
-                    df_p_full.at[p_idx, "Gewicht_aktuell"] = mess_gewicht
-                    df_p_full.at[p_idx, "Wiegedatum"] = str(mess_datum)
-                    speichere_df_gs(df_p_full, "patienten")
-                    
-                    st.success(f"Messwert {mess_gewicht} kg vom {mess_datum} wurde gespeichert.")
+            with st.expander("➕ Neues Gewicht loggen"):
+                neu_w = st.number_input("Gewicht (kg):", step=0.1)
+                if st.button("Gewicht speichern"):
+                    h_str = datetime.now().strftime("%Y-%m-%d")
+                    speichere_zeile_gs([h_str, p_wahl, neu_w], "gewichtsverlauf")
                     st.rerun()
 
-
-# --- MODUL 3: PATIENTEN ---
+# --- MODUL 3: PATIENTENVERWALTUNG (INKL. LÖSCHEN & KOPIEREN) ---
 elif menu == "3. Patientenverwaltung":
-    st.header("👥 Patientenverwaltung")
+    st.header("👥 Patientenverwaltung & Stammdaten")
     df_p = lade_daten_gs("patienten")
-    if not df_p.empty:
-        st.dataframe(df_p, use_container_width=True, hide_index=True)
-    with st.expander("Neuen Patienten anlegen"):
-        with st.form("p_form"):
-            n = st.text_input("Name")
-            z = st.number_input("Ziel Kcal", value=2000)
-            if st.form_submit_button("Speichern"):
-                h = datetime.now().strftime("%Y-%m-%d")
-                new_p = pd.DataFrame([[n, z, "", "", 165, "P25", 0, h]], 
+    
+    tab_list, tab_new, tab_copy, tab_del = st.tabs([
+        "📋 Liste", "➕ Neu anlegen", "👯 Kopieren", "🗑️ Löschen"
+    ])
+    
+    with tab_list:
+        if not df_p.empty:
+            st.dataframe(df_p, use_container_width=True, hide_index=True)
+        else:
+            st.info("Keine Patienten registriert.")
+            
+    with tab_new:
+        with st.form("p_new_form"):
+            st.write("**Neuen Patienten erfassen**")
+            col1, col2 = st.columns(2)
+            with col1:
+                n_name = st.text_input("Vollständiger Name")
+                n_ziel = st.number_input("Kalorienziel (kcal)", value=2000, step=50)
+                n_geschl = st.selectbox("Geschlecht", ["weiblich", "männlich", "divers"])
+            with col2:
+                n_groesse = st.number_input("Größe (cm)", value=165)
+                n_perz = st.text_input("Ziel-Perzentile", "P25")
+                n_geb = st.date_input("Geburtsdatum", value=datetime(2010,1,1))
+            
+            if st.form_submit_button("Patient speichern"):
+                heute = datetime.now().strftime("%Y-%m-%d")
+                new_row = pd.DataFrame([[n_name, n_ziel, n_geschl, str(n_geb), n_groesse, n_perz, 0, heute]], 
                                      columns=["Name", "Ziel_Kcal", "Geschlecht", "Geburtsdatum", "Groesse_cm", "Ziel_Perzentile", "Gewicht_aktuell", "Wiegedatum"])
-                df_p = pd.concat([df_p, new_p], ignore_index=True)
+                df_p = pd.concat([df_p, new_row], ignore_index=True)
                 speichere_df_gs(df_p, "patienten")
+                st.success(f"Patient {n_name} wurde angelegt.")
+                st.rerun()
+
+    with tab_copy:
+        if not df_p.empty:
+            st.write("**Patienten-Daten als Vorlage nutzen**")
+            p_vorlage = st.selectbox("Vorlage wählen:", df_p["Name"], key="copy_select")
+            v_data = df_p[df_p["Name"] == p_vorlage].iloc[0]
+            
+            with st.form("p_copy_form"):
+                new_n_name = st.text_input("Name des NEUEN Patienten")
+                st.info(f"Übernehme Ziel ({v_data['Ziel_Kcal']} kcal) und Größe ({v_data['Groesse_cm']} cm) von {p_vorlage}")
+                
+                if st.form_submit_button("Kopie als neuen Patienten speichern"):
+                    if new_n_name and new_n_name != p_vorlage:
+                        heute = datetime.now().strftime("%Y-%m-%d")
+                        # Werte von Vorlage übernehmen
+                        new_row = pd.DataFrame([[new_n_name, v_data['Ziel_Kcal'], v_data['Geschlecht'], v_data['Geburtsdatum'], v_data['Groesse_cm'], v_data['Ziel_Perzentile'], 0, heute]], 
+                                             columns=df_p.columns)
+                        df_p = pd.concat([df_p, new_row], ignore_index=True)
+                        speichere_df_gs(df_p, "patienten")
+                        st.success(f"Kopie für {new_n_name} erstellt.")
+                        st.rerun()
+                    else:
+                        st.error("Bitte einen neuen, eindeutigen Namen eingeben.")
+        else:
+            st.write("Keine Vorlagen verfügbar.")
+
+    with tab_del:
+        if not df_p.empty:
+            st.write("**Patienten endgültig aus System entfernen**")
+            p_loeschen = st.selectbox("Patient zum Löschen wählen:", df_p["Name"], key="del_select")
+            st.warning(f"⚠️ Achtung: Alle Stammdaten für {p_loeschen} werden gelöscht.")
+            
+            if st.button(f"Unwiderruflich löschen: {p_loeschen}", type="primary"):
+                df_p = df_p[df_p["Name"] != p_loeschen]
+                speichere_df_gs(df_p, "patienten")
+                st.success(f"Patient {p_loeschen} wurde entfernt.")
                 st.rerun()
 
 # --- MODUL 4: DATENBANK INFO ---
@@ -200,7 +229,6 @@ elif menu == "4. Datenbank-Info":
     st.header("📊 Lebensmittel-Übersicht")
     df_db = lade_daten_gs("lebensmittel")
     if not df_db.empty:
-        st.write("Deine aktuelle Lebensmittel-Liste:")
         st.dataframe(df_db, use_container_width=True, hide_index=True)
 
 
