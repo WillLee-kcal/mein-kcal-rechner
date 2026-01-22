@@ -1,3 +1,5 @@
+import openfoodfacts
+print("Installation erfolgreich!")
 import streamlit as st
 import pandas as pd
 import gspread
@@ -245,3 +247,4 @@ elif menu == "4. Datenbank (Editierbar)":
                 st.rerun()
     else:
         st.error("Datenbank konnte nicht geladen werden.")
+
