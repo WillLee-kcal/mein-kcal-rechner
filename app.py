@@ -5,7 +5,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 from datetime import datetime
 
-# --- 1. GOOGLE SHEETS SETUP (HYBRID) ---
+# --- 1. GOOGLE SHEETS SETUP ---
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     if "gcp_service_account" in st.secrets:
@@ -46,6 +46,62 @@ menu = st.sidebar.radio("Menü wählen:", [
     "3. Patientenverwaltung", 
     "4. Datenbank bearbeiten"
 ])
+
+# --- MODUL 1: MAHLZEIT ERFASSEN (Mit Unterteilung Intern/Extern) ---
+if menu == "1. Mahlzeit & Logbuch":
+    st.header("⚖️ Mahlzeit erfassen")
+    df_db = lade_daten_gs("lebensmittel")
+    df_p = lade_daten_gs("patienten")
+    
+    if df_p.empty:
+        st.warning("Bitte lege zuerst einen Patienten an.")
+    elif df_db.empty:
+        st.warning("Datenbank leer.")
+    else:
+        # Filter für die Datenbank-Unterteilung
+        typ_filter = st.radio("Kategorie wählen:", ["Alle", "Intern", "Extern"], horizontal=True)
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            p_wahl = st.selectbox("Patient:", df_p["Name"])
+            
+            # Datenbank filtern basierend auf Radio-Button
+            if typ_filter != "Alle":
+                df_gefiltert = df_db[df_db['Typ'] == typ_filter]
+            else:
+                df_gefiltert = df_db
+                
+            suche = st.text_input(f"Suche in {typ_filter}:")
+        
+        if suche:
+            treffer = df_gefiltert[df_gefiltert['Name'].str.contains(suche, case=False, na=False)]
+            if not treffer.empty:
+                wahl = st.selectbox("Gefunden:", treffer['Name'])
+                item = df_db[df_db['Name'] == wahl].iloc[0]
+                
+                # Info-Box aus den klinischen Daten
+                std_info = item.get('Standard_Menge', 'Stück')
+                st.info(f"Vorlage: 1 Einheit = {std_info}")
+                
+                with col_b:
+                    menge = st.number_input("Anzahl / Menge:", min_value=0.0, step=0.5)
+                    einheit = st.radio("Basis:", ["Stück / Einheit", "Gramm"])
+                
+                gewicht = menge * float(item['stueck_gewicht']) if einheit == "Stück / Einheit" else menge
+                kcal_total = (float(item['kcal_100g']) / 100) * gewicht
+                
+                st.metric("Berechnet", f"{kcal_total:.1f} kcal")
+                
+                if st.button("Speichern"):
+                    heute = datetime.now().strftime("%Y-%m-%d")
+                    speichere_zeile_gs([heute, p_wahl, wahl, gewicht, kcal_total], "verzehr")
+                    st.success("Im Logbuch vermerkt!")
+            else:
+                st.error("Nichts gefunden.")
+
+
+
+# (Module 2 und 3 bleiben wie im letzten Schritt...)
 
 # --- MODUL 1: MAHLZEIT ERFASSEN (Optimiert für Mengen) ---
 if menu == "1. Mahlzeit & Logbuch":
@@ -141,18 +197,29 @@ elif menu == "3. Patientenverwaltung":
     with t2:
         st.dataframe(df_p, use_container_width=True)
 
-# --- MODUL 4: DATENBANK ---
+# --- MODUL 4: DATENBANK BEARBEITEN (Mit Typ-Auswahl) ---
 elif menu == "4. Datenbank bearbeiten":
-    st.header("📊 Lebensmittel-Datenbank")
+    st.header("📊 Datenbank")
     df_db = lade_daten_gs("lebensmittel")
-    st.dataframe(df_db, use_container_width=True)
-    with st.expander("Neu hinzufügen"):
-        with st.form("new_f"):
-            fn = st.text_input("Name")
-            fk = st.number_input("Kcal/100g")
-            fs = st.number_input("Stückgewicht (optional)")
-            if st.form_submit_button("Speichern"):
-                new_db = pd.concat([df_db, pd.DataFrame([[fn, fk, fs]], columns=["Name", "kcal_100g", "stueck_gewicht"])])
-                speichere_df_gs(new_db, "lebensmittel")
+    
+    # Filter-Anzeige der Tabelle
+    ansicht = st.segmented_control("Tabellenansicht:", ["Intern", "Extern", "Alle"], default="Alle")
+    if ansicht != "Alle":
+        st.dataframe(df_db[df_db['Typ'] == ansicht], use_container_width=True)
+    else:
+        st.dataframe(df_db, use_container_width=True)
+    
+    with st.expander("Neues Produkt hinzufügen"):
+        with st.form("add_food"):
+            f_typ = st.selectbox("Typ:", ["Intern", "Extern"])
+            f_name = st.text_input("Bezeichnung")
+            f_kcal = st.number_input("Kcal/100g")
+            f_stk = st.number_input("Stückgewicht (g)")
+            f_std = st.text_input("Standard-Menge (z.B. 1 Eßl.)")
+            if st.form_submit_button("Hinzufügen"):
+                # Wir stellen sicher, dass die Spaltenreihenfolge stimmt
+                new_row = pd.DataFrame([[f_name, f_kcal, f_stk, f_std, f_typ]], 
+                                     columns=["Name", "kcal_100g", "stueck_gewicht", "Standard_Menge", "Typ"])
+                df_db = pd.concat([df_db, new_row], ignore_index=True)
+                speichere_df_gs(df_db, "lebensmittel")
                 st.rerun()
-
