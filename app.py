@@ -1,11 +1,10 @@
-import openfoodfacts
-print("Installation erfolgreich!")
 import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
 from datetime import datetime
+import openfoodfacts
 
 # --- KONSTANTEN ---
 MAHLZEITEN_LISTE = [
@@ -37,7 +36,6 @@ def lade_daten_gs_cached(sheet_name):
             sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
             data = sheet.get_all_records()
             df = pd.DataFrame(data)
-            # Spaltennamen bereinigen (Leerzeichen weg)
             df.columns = df.columns.str.strip()
             return df
         except: return pd.DataFrame()
@@ -67,7 +65,12 @@ def speichere_df_gs(df, sheet_name):
 # --- 2. LAYOUT & NAVIGATION ---
 st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="📈")
 st.sidebar.title("🍎 Navigation")
-menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank (Editierbar)"])
+menu = st.sidebar.radio("Menü wählen:", [
+    "1. Mahlzeit erfassen", 
+    "2. Patienten-Dashboard", 
+    "3. Patientenverwaltung", 
+    "4. Datenbank (Editierbar)"
+])
 
 # --- MODUL 1: MAHLZEIT ERFASSEN ---
 if menu == "1. Mahlzeit erfassen":
@@ -81,7 +84,7 @@ if menu == "1. Mahlzeit erfassen":
             p_wahl = st.selectbox("1. Patient wählen:", df_p["Name"])
             m_zeit = st.selectbox("2. Mahlzeit wählen:", MAHLZEITEN_LISTE)
             st.write("---")
-            auswahl_typ = st.radio("3. Kategorie filter:", ["Intern", "Extern", "Alle"], horizontal=True)
+            auswahl_typ = st.radio("3. Kategorie filtern:", ["Intern", "Extern", "Alle"], horizontal=True)
             df_gefiltert = df_db if auswahl_typ == "Alle" else df_db[df_db['Typ'] == auswahl_typ]
             lebensmittel_wahl = st.selectbox("4. Lebensmittel wählen:", ["Bitte wählen..."] + list(df_gefiltert['Name'].unique()))
 
@@ -89,19 +92,20 @@ if menu == "1. Mahlzeit erfassen":
             item = df_db[df_db['Name'] == lebensmittel_wahl].iloc[0]
             k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
             stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
-            # Flexible Suche nach der Kcal-Spalte
+            
+            # Flexible Suche nach Referenzwert
             k_ref = 0
-            for col in ["kcal_pro_Einheit", "Kcal_pro_Einheit", "kcal_pro_einheit"]:
+            for col in ["kcal_pro_Einheit", "Kcal_pro_Einheit"]:
                 if col in item:
                     k_ref = pd.to_numeric(item[col], errors='coerce') or 0
                     break
-            
-            std_menge = item.get('Standard_Menge', '1 Stück')
 
             with c2:
-                st.info(f"📋 **Referenz:** {std_menge} ≈ {k_ref} kcal")
-                menge = st.number_input(f"Anzahl / Menge ({std_menge}):", min_value=0.0, step=0.5, value=1.0)
+                std_m = item.get('Standard_Menge', '1 Stück')
+                st.info(f"📋 **Referenz:** {std_m} ≈ {k_ref} kcal")
+                menge = st.number_input(f"Anzahl / Menge ({std_m}):", min_value=0.0, step=0.5, value=1.0)
                 basis = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"])
+                
                 gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
                 kcal_total = (k100 / 100) * gewicht
                 st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal")
@@ -186,6 +190,18 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
+    with t_copy:
+        if not df_p.empty:
+            p_vor = st.selectbox("Vorlage:", df_p["Name"])
+            v_d = df_p[df_p["Name"] == p_vor].iloc[0]
+            new_n = st.text_input("Neuer Name")
+            if st.button("Kopie erstellen"):
+                heute = datetime.now().strftime("%Y-%m-%d")
+                new_p = pd.DataFrame([[new_n, v_d['Ziel_Kcal'], v_d['Geschlecht'], v_d['Geburtsdatum'], v_d['Groesse_cm'], v_d['Ziel_Perzentile'], 0, heute]], columns=df_p.columns)
+                df_p = pd.concat([df_p, new_p], ignore_index=True)
+                speichere_df_gs(df_p, "patienten")
+                st.rerun()
+
     with t_del:
         if not df_p.empty:
             p_kill = st.selectbox("Patient löschen:", df_p["Name"])
@@ -197,75 +213,45 @@ elif menu == "3. Patientenverwaltung":
 # --- MODUL 4: DATENBANK (EDITIERBAR & IMPORT) ---
 elif menu == "4. Datenbank (Editierbar)":
     st.header("📊 Lebensmittel-Datenbank & Import")
+    t_edit, t_imp = st.tabs(["✏️ Datenbank-Editor", "🌍 Externer Import (OFF)"])
     
-    tab_editor, tab_import = st.tabs(["✏️ Datenbank-Editor", "🌍 Externer Import (OFF)"])
-    
-    with tab_editor:
+    with t_edit:
         df_db = lade_daten_gs("lebensmittel")
         if not df_db.empty:
-            # Datentyp-Fix wie zuvor
+            # Datentypen für Editor erzwingen
             df_db["kcal_100g"] = pd.to_numeric(df_db["kcal_100g"], errors='coerce').fillna(0)
             df_db["stueck_gewicht"] = pd.to_numeric(df_db["stueck_gewicht"], errors='coerce').fillna(0)
             
-            st.info("💡 Änderungen hier werden erst durch 'Speichern' permanent.")
-            edited_df = st.data_editor(df_db, num_rows="dynamic", use_container_width=True, hide_index=True, key="db_edit_main")
-            
+            # Suche nach der Kcal_pro_Einheit Spalte zum Konvertieren
+            for c in ["kcal_pro_Einheit", "Kcal_pro_Einheit"]:
+                if c in df_db.columns:
+                    df_db[c] = pd.to_numeric(df_db[c], errors='coerce').fillna(0)
+
+            edited_df = st.data_editor(df_db, num_rows="dynamic", use_container_width=True, hide_index=True, key="main_db_editor")
             if st.button("💾 Alle Änderungen speichern"):
                 speichere_df_gs(edited_df, "lebensmittel")
                 st.success("Datenbank aktualisiert!")
                 st.rerun()
 
-    with tab_import:
+    with t_imp:
         st.subheader("Produkte weltweit suchen")
-        suche_begriff = st.text_input("Markenprodukt suchen (z.B. 'Snickers' oder 'Dr. Oetker'):")
-        
-        if suche_begriff:
-            with st.spinner("Suche in Open Food Facts..."):
-                off_api = openfoodfacts.API(user_agent="KcalTrackerKlinik/1.0")
-                results = off_api.product.text_search(suche_begriff)
-                
-                if results and 'products' in results:
-                    products = results['products'][:10] # Top 10 Ergebnisse
+        suche = st.text_input("Markenprodukt suchen (z.B. 'Snickers'):")
+        if suche:
+            off_api = openfoodfacts.API(user_agent="KcalTracker/1.0")
+            res = off_api.product.text_search(suche)
+            if res and 'products' in res:
+                for p in res['products'][:10]:
+                    p_name = p.get('product_name', 'Unbekannt')
+                    p_brand = p.get('brands', 'Diverse')
+                    nutriments = p.get('nutriments', {})
+                    p_kcal = nutriments.get('energy-kcal_100g')
                     
-                    for p in products:
-                        p_name = p.get('product_name', 'Unbekannt')
-                        p_brand = p.get('brands', 'Keine Marke')
-                        nutriments = p.get('nutriments', {})
-                        p_kcal = nutriments.get('energy-kcal_100g')
-                        
-                        if p_kcal is not None:
-                            col_a, col_b = st.columns([3, 1])
-                            col_a.write(f"**{p_name}** ({p_brand}) - {p_kcal} kcal/100g")
-                            
-                            # Import-Button für dieses spezifische Produkt
-                            # Import-Button für dieses spezifische Produkt
-                            if col_b.button("📥 Importieren", key=f"import_{p.get('_id')}"):
-                                # Daten vorbereiten
-                                p_name = p.get('product_name', 'Unbekannt')
-                                nutriments = p.get('nutriments', {})
-                                p_kcal = nutriments.get('energy-kcal_100g', 0)
-                                
-                                # Die Reihenfolge muss exakt deinem Google Sheet entsprechen:
-                                # [Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ]
-                                neue_zeile = [
-                                    p_name,      # Spalte A: Name
-                                    p_kcal,      # Spalte B: kcal_100g
-                                    0,           # Spalte C: stueck_gewicht
-                                    "1 Stück",   # Spalte D: Standard_Menge
-                                    0,           # Spalte E: kcal_pro_Einheit
-                                    "Extern"     # Spalte F: Typ
-                                ]
-                                
-                                speichere_zeile_gs(neue_zeile, "lebensmittel")
-                                st.success(f"'{p_name}' wurde hinzugefügt!")
-                                st.rerun()
-    
-    speichere_zeile_gs(neue_zeile, "lebensmittel")
-    st.success(f"'{p_name}' wurde korrekt zugeordnet und hinzugefügt!")
-    st.rerun()
-                        else:
-                            st.write(f"⚪ {p_name} - (Keine Kcal-Daten verfügbar)")
-                else:
-                    st.error("Keine Produkte gefunden.")
-
-
+                    if p_kcal is not None:
+                        col_a, col_b = st.columns([3, 1])
+                        col_a.write(f"**{p_name}** ({p_brand}) - {p_kcal} kcal/100g")
+                        if col_b.button("📥 Import", key=f"imp_{p.get('_id')}"):
+                            # REIHENFOLGE: [Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ]
+                            neue_zeile = [p_name, p_kcal, 0, "1 Stück", 0, "Extern"]
+                            speichere_zeile_gs(neue_zeile, "lebensmittel")
+                            st.success(f"{p_name} hinzugefügt!")
+                            st.rerun()
