@@ -11,7 +11,7 @@ MAHLZEITEN_LISTE = [
     "Zwischenmahlzeit 2", "Abendessen", "Zwischenmahlzeit 3"
 ]
 
-# --- 1. SETUP & VERBINDUNG ZU GOOGLE SHEETS ---
+# --- 1. SETUP & VERBINDUNG ---
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -58,46 +58,78 @@ st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="🍎
 st.sidebar.title("🍎 Navigation")
 menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Info"])
 
-# --- MODUL 1: MAHLZEIT ERFASSEN ---
+# --- MODUL 1: MAHLZEIT ERFASSEN (MIT SCHNELLAUSWAHL) ---
 if menu == "1. Mahlzeit erfassen":
     st.header("⚖️ Mahlzeit ins Logbuch eintragen")
     df_db = lade_daten_gs("lebensmittel")
     df_p = lade_daten_gs("patienten")
     
-    if not df_p.empty:
+    if not df_p.empty and not df_db.empty:
         c1, c2 = st.columns(2)
+        
         with c1:
-            p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
-            m_zeit = st.selectbox("Mahlzeit wählen:", MAHLZEITEN_LISTE)
-            suche = st.text_input("Lebensmittel suchen (z.B. Mischbrot):")
+            p_wahl = st.selectbox("1. Patient wählen:", df_p["Name"])
+            m_zeit = st.selectbox("2. Mahlzeit wählen:", MAHLZEITEN_LISTE)
             
-        if suche and not df_db.empty:
-            treffer = df_db[df_db['Name'].str.contains(suche, case=False, na=False)]
-            if not treffer.empty:
-                wahl = st.selectbox("Gefunden:", treffer['Name'])
-                item = treffer[treffer['Name'] == wahl].iloc[0]
+            st.write("---")
+            # SCHNELLAUSWAHL ÜBER KATEGORIEN
+            auswahl_typ = st.radio("3. Kategorie filtern:", ["Intern", "Extern", "Alle"], horizontal=True)
+            
+            # Datenbank filtern
+            if auswahl_typ == "Alle":
+                df_gefiltert = df_db
+            else:
+                df_gefiltert = df_db[df_db['Typ'] == auswahl_typ]
+            
+            # Dropdown für Lebensmittel
+            lebensmittel_wahl = st.selectbox("4. Lebensmittel wählen:", ["Bitte wählen..."] + list(df_gefiltert['Name'].unique()))
+
+        if lebensmittel_wahl != "Bitte wählen...":
+            item = df_db[df_db['Name'] == lebensmittel_wahl].iloc[0]
+            
+            # Daten laden
+            k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
+            stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
+            k_ref = pd.to_numeric(item.get('kcal_pro_Einheit', 0), errors='coerce') or 0
+            std_menge = item.get('Standard_Menge', '1 Stück')
+
+            with c2:
+                st.info(f"📋 **Referenz:** {std_menge} ≈ {k_ref} kcal")
                 
-                # Werte aus DB laden (inkl. neuer Spalte)
-                k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
-                stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
-                k_einheit = pd.to_numeric(item.get('kcal_pro_Einheit', 0), errors='coerce') or 0
+                menge = st.number_input(f"Anzahl / Menge ({std_menge}):", min_value=0.0, step=0.5, value=1.0)
+                basis = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"])
                 
-                with c2:
-                    st.info(f"💡 Referenzwert (DB): {k_einheit} kcal pro {item.get('Standard_Menge', 'Einheit')}")
-                    menge = st.number_input("Anzahl / Menge:", min_value=0.0, step=0.5, value=1.0)
-                    basis = st.radio("Berechnung:", ["Einheit / Stück", "Gramm"])
-                
-                # --- LIVE BERECHNUNG ---
-                gewicht = menge * stk_w if basis == "Einheit / Stück" else menge
+                # --- BERECHNUNG ---
+                gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
+                # Formel: (kcal/100g / 100) * Gewicht
                 kcal_total = (k100 / 100) * gewicht
                 
-                st.metric("Live-Berechnung", f"{kcal_total:.1f} kcal")
+                st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal")
                 
-                if st.button("💾 Speichern"):
+                # Optional: Warnung bei starker Abweichung vom Referenzwert
+                if basis == "Stück / Einheit" and menge == 1.0 and abs(kcal_total - k_ref) > 1:
+                    st.warning(f"Abweichung: Rechnung ({kcal_total:.1f}) weicht von Referenz ({k_ref}) ab. Bitte DB prüfen.")
+
+                if st.button("💾 In Logbuch speichern"):
                     heute = datetime.now().strftime("%Y-%m-%d")
-                    speichere_zeile_gs([heute, p_wahl, m_zeit, wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
-                    st.success("Eintrag gespeichert!")
-            else: st.error("Kein Eintrag gefunden.")
+                    speichere_zeile_gs([heute, p_wahl, m_zeit, lebensmittel_wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
+                    st.success(f"{lebensmittel_wahl} wurde für {m_zeit} gespeichert!")
+    else:
+        st.warning("Bitte stelle sicher, dass Patienten und Lebensmittel in der Datenbank vorhanden sind.")
+
+# --- MODUL 2, 3 & 4 (BLEIBEN WIE GEHABT) ---
+elif menu == "2. Patienten-Dashboard":
+    # ... (Dein bisheriger Dashboard-Code)
+    st.write("Hier erscheint dein Dashboard") # Platzhalter
+
+elif menu == "3. Patientenverwaltung":
+    # ... (Dein bisheriger Patienten-Code)
+    st.write("Hier erscheint die Patientenverwaltung") # Platzhalter
+
+elif menu == "4. Datenbank-Info":
+    st.header("📊 Lebensmittel-Übersicht")
+    df_db = lade_daten_gs("lebensmittel")
+    st.dataframe(df_db, use_container_width=True, hide_index=True)
 
 # --- MODUL 2: DASHBOARD ---
 elif menu == "2. Patienten-Dashboard":
@@ -178,3 +210,4 @@ elif menu == "4. Datenbank-Info":
     if not df_db.empty:
         st.write("Deine aktuelle Lebensmittel-Liste:")
         st.dataframe(df_db, use_container_width=True, hide_index=True)
+
