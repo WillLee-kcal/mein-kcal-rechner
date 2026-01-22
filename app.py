@@ -2,39 +2,28 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import json
 
-# --- GOOGLE SHEETS SETUP ---
+# --- GOOGLE SHEETS SETUP (HYBRID) ---
 
 def get_gsheet_client():
-    # Definiert den Zugriffsbereich (Scope)
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    # Nutzt deine heruntergeladene Schlüssel-Datei
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    
+    # 1. Versuch: Aus den Streamlit Secrets laden (für die Cloud)
+    if "gcp_service_account" in st.secrets:
+        # Wir laden die Daten direkt aus dem Cloud-Tresor
+        credentials_info = st.secrets["gcp_service_account"]
+        # Falls es als String gespeichert ist, in ein Dictionary umwandeln
+        if isinstance(credentials_info, str):
+            credentials_info = json.loads(credentials_info)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_info, scope)
+    
+    # 2. Versuch: Aus der lokalen Datei laden (für deinen PC)
+    else:
+        creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+        
     client = gspread.authorize(creds)
     return client
-
-def lade_daten_gs(sheet_name):
-    try:
-        client = get_gsheet_client()
-        # Öffnet die Tabelle und das spezifische Tabellenblatt
-        sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
-        data = sheet.get_all_records()
-        return pd.DataFrame(data)
-    except Exception as e:
-        st.error(f"Fehler beim Laden von {sheet_name}: {e}")
-        return pd.DataFrame()
-
-def speichere_daten_gs(df, sheet_name):
-    try:
-        client = get_gsheet_client()
-        sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
-        # Löscht das Blatt und schreibt die neuen Daten (inkl. Header) hinein
-        sheet.clear()
-        sheet.update([df.columns.values.tolist()] + df.values.tolist())
-        return True
-    except Exception as e:
-        st.error(f"Fehler beim Speichern von {sheet_name}: {e}")
-        return False
 
 # --- STREAMLIT OBERFLÄCHE ---
 
