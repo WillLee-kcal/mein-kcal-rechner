@@ -11,7 +11,7 @@ MAHLZEITEN_LISTE = [
     "Zwischenmahlzeit 2", "Abendessen", "Zwischenmahlzeit 3"
 ]
 
-# --- 1. SETUP & TURBO-CACHING ---
+# --- 1. SETUP & VERBINDUNG ---
 
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -55,15 +55,17 @@ def speichere_df_gs(df, sheet_name):
         client = get_gsheet_client()
         sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
         sheet.clear()
+        # Wichtig: NaN Werte zu leeren Strings machen für Google Sheets
         df_clean = df.fillna("")
         sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
         st.cache_data.clear() 
-    except: st.error("Fehler beim Update.")
+    except Exception as e: 
+        st.error(f"Fehler beim Update: {e}")
 
 # --- 2. LAYOUT & NAVIGATION ---
 st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="📈")
 st.sidebar.title("🍎 Navigation")
-menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Info"])
+menu = st.sidebar.radio("Menü wählen:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank (Editierbar)"])
 
 # --- MODUL 1: MAHLZEIT ERFASSEN ---
 if menu == "1. Mahlzeit erfassen":
@@ -77,7 +79,7 @@ if menu == "1. Mahlzeit erfassen":
             p_wahl = st.selectbox("1. Patient wählen:", df_p["Name"])
             m_zeit = st.selectbox("2. Mahlzeit wählen:", MAHLZEITEN_LISTE)
             st.write("---")
-            auswahl_typ = st.radio("3. Kategorie filtern:", ["Intern", "Extern", "Alle"], horizontal=True)
+            auswahl_typ = st.radio("3. Kategorie filter:", ["Intern", "Extern", "Alle"], horizontal=True)
             df_gefiltert = df_db if auswahl_typ == "Alle" else df_db[df_db['Typ'] == auswahl_typ]
             lebensmittel_wahl = st.selectbox("4. Lebensmittel wählen:", ["Bitte wählen..."] + list(df_gefiltert['Name'].unique()))
 
@@ -112,7 +114,7 @@ elif menu == "2. Patienten-Dashboard":
         p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
         p_data = df_p[df_p["Name"] == p_wahl].iloc[0]
         
-        t_kcal, t_trend = st.tabs(["🍎 Kalorien heute", "📈 Gewichtsverlauf (Grafik)"])
+        t_kcal, t_trend = st.tabs(["🍎 Kalorien heute", "📈 Gewichtsverlauf"])
         
         with t_kcal:
             heute = datetime.now().strftime("%Y-%m-%d")
@@ -176,18 +178,6 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-    with t_copy:
-        if not df_p.empty:
-            p_vorlage = st.selectbox("Vorlage:", df_p["Name"])
-            v_data = df_p[df_p["Name"] == p_vorlage].iloc[0]
-            new_name = st.text_input("Neuer Name")
-            if st.button("Kopie erstellen"):
-                heute = datetime.now().strftime("%Y-%m-%d")
-                new_p = pd.DataFrame([[new_name, v_data['Ziel_Kcal'], v_data['Geschlecht'], v_data['Geburtsdatum'], v_data['Groesse_cm'], v_data['Ziel_Perzentile'], 0, heute]], columns=df_p.columns)
-                df_p = pd.concat([df_p, new_p], ignore_index=True)
-                speichere_df_gs(df_p, "patienten")
-                st.rerun()
-
     with t_del:
         if not df_p.empty:
             p_kill = st.selectbox("Patient löschen:", df_p["Name"])
@@ -196,9 +186,28 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-# --- MODUL 4: DATENBANK INFO ---
-elif menu == "4. Datenbank-Info":
-    st.header("📊 Lebensmittel-Übersicht")
+# --- MODUL 4: DATENBANK (EDITIERBARER EXCEL-MODUS) ---
+elif menu == "4. Datenbank (Editierbar)":
+    st.header("📊 Lebensmittel-Datenbank (Direkt-Editor)")
+    st.info("💡 Du kannst Werte direkt in der Tabelle ändern, Zeilen hinzufügen oder löschen. Klicke danach auf den Speicher-Button unten.")
+    
     df_db = lade_daten_gs("lebensmittel")
+    
     if not df_db.empty:
-        st.dataframe(df_db, use_container_width=True, hide_index=True)
+        # Der magische Editor
+        edited_df = st.data_editor(
+            df_db, 
+            num_rows="dynamic", # Erlaubt das Hinzufügen/Löschen von Zeilen
+            use_container_width=True,
+            hide_index=True,
+            key="db_editor"
+        )
+        
+        col_s1, col_s2 = st.columns([1, 4])
+        if col_s1.button("💾 Änderungen speichern"):
+            with st.spinner("Speichere Daten in Google Sheets..."):
+                speichere_df_gs(edited_df, "lebensmittel")
+                st.success("Datenbank erfolgreich aktualisiert!")
+                st.rerun()
+    else:
+        st.error("Datenbank konnte nicht geladen werden.")
