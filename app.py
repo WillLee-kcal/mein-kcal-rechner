@@ -239,12 +239,27 @@ elif menu == "4. Datenbank (Editierbar)":
                             
                             # Import-Button für dieses spezifische Produkt
                             if col_b.button("📥 Importieren", key=f"import_{p.get('_id')}"):
-                                # In eigene DB übernehmen
-                                neue_zeile = [p_name, p_kcal, 0, 0, "1 Stück", "Extern"]
-                                speichere_zeile_gs(neue_zeile, "lebensmittel")
-                                st.success(f"'{p_name}' wurde deiner Liste hinzugefügt!")
-                                st.rerun()
+    # Wir bereiten die Daten vor
+    p_name = p.get('product_name', 'Unbekannt')
+    nutriments = p.get('nutriments', {})
+    p_kcal = nutriments.get('energy-kcal_100g', 0)
+    
+    # WICHTIG: Die Reihenfolge muss exakt deinem Google Sheet entsprechen:
+    # [Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ]
+    neue_zeile = [
+        p_name,      # Spalte 1: Name
+        p_kcal,      # Spalte 2: kcal_100g
+        0,           # Spalte 3: stueck_gewicht (wird später manuell im Editor gefüllt)
+        "1 Stück",   # Spalte 4: Standard_Menge (JETZT AN POSITION 4)
+        0,           # Spalte 5: kcal_pro_Einheit (JETZT AN POSITION 5)
+        "Extern"     # Spalte 6: Typ
+    ]
+    
+    speichere_zeile_gs(neue_zeile, "lebensmittel")
+    st.success(f"'{p_name}' wurde korrekt zugeordnet und hinzugefügt!")
+    st.rerun()
                         else:
                             st.write(f"⚪ {p_name} - (Keine Kcal-Daten verfügbar)")
                 else:
                     st.error("Keine Produkte gefunden.")
+
