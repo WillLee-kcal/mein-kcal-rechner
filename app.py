@@ -101,7 +101,7 @@ if menu == "1. Mahlzeit & Logbuch":
 
 
 
-# (Module 2 und 3 bleiben wie im letzten Schritt...)
+
 
 # --- MODUL 1: MAHLZEIT ERFASSEN (Optimiert für Mengen) ---
 if menu == "1. Mahlzeit & Logbuch":
@@ -181,21 +181,78 @@ elif menu == "2. Dashboard (Grafik)":
         chart_data = pd.DataFrame({"Kategorie": ["Gegessen", "Ziel"], "Kcal": [gegessen, ziel]})
         st.bar_chart(chart_data, x="Kategorie", y="Kcal")
 
-# --- MODUL 3: PATIENTENVERWALTUNG ---
+# --- MODUL 3: PATIENTENVERWALTUNG (ERWEITERT) ---
 elif menu == "3. Patientenverwaltung":
-    st.header("👥 Patientenverwaltung")
+    st.header("👥 Patientenverwaltung & Stammdaten")
     df_p = lade_daten_gs("patienten")
-    t1, t2 = st.tabs(["Patient anlegen", "Übersicht"])
-    with t1:
-        with st.form("new_p"):
-            n = st.text_input("Name")
-            z = st.number_input("Ziel Kcal", value=2000)
-            if st.form_submit_button("Speichern"):
-                new_df = pd.concat([df_p, pd.DataFrame([[n, z]], columns=["Name", "Ziel_Kcal"])])
-                speichere_df_gs(new_df, "patienten")
+    
+    # Tabs für bessere Übersicht
+    tab_liste, tab_neu, tab_bearbeiten, tab_loeschen = st.tabs([
+        "📋 Patientenliste", 
+        "➕ Neu anlegen", 
+        "✏️ Ziel anpassen", 
+        "🗑️ Entlassen/Löschen"
+    ])
+
+    # --- TAB 1: LISTE & SUCHE ---
+    with tab_liste:
+        if not df_p.empty:
+            suche_p = st.text_input("Patient suchen:", placeholder="Name eingeben...")
+            if suche_p:
+                df_anzeige = df_p[df_p['Name'].str.contains(suche_p, case=False, na=False)]
+            else:
+                df_anzeige = df_p
+            
+            st.dataframe(df_anzeige, use_container_width=True, hide_index=True)
+            st.info(f"Anzahl registrierter Patienten: {len(df_p)}")
+        else:
+            st.write("Noch keine Patienten registriert.")
+
+    # --- TAB 2: NEU ANLEGEN ---
+    with tab_neu:
+        with st.form("form_p_neu"):
+            n_name = st.text_input("Vollständiger Name:")
+            n_ziel = st.number_input("Tagesziel (kcal):", min_value=500, max_value=5000, value=2000, step=50)
+            submit_n = st.form_submit_button("Patient registrieren")
+            
+            if submit_n:
+                if n_name and n_name not in df_p['Name'].values:
+                    # Neue Zeile erstellen
+                    neu_p = pd.DataFrame([[n_name, n_ziel]], columns=["Name", "Ziel_Kcal"])
+                    df_p = pd.concat([df_p, neu_p], ignore_index=True)
+                    speichere_df_gs(df_p, "patienten")
+                    st.success(f"Patient {n_name} wurde erfolgreich angelegt!")
+                    st.rerun()
+                else:
+                    st.error("Name fehlt oder Patient existiert bereits.")
+
+    # --- TAB 3: ZIEL ANPASSEN (BEARBEITEN) ---
+    with tab_bearbeiten:
+        if not df_p.empty:
+            p_edit = st.selectbox("Welchen Patienten bearbeiten?", df_p["Name"], key="edit_select")
+            aktuelles_ziel = df_p.loc[df_p["Name"] == p_edit, "Ziel_Kcal"].values[0]
+            
+            neues_ziel = st.number_input(f"Neues Ziel für {p_edit}:", value=int(aktuelles_ziel), step=50)
+            
+            if st.button("Änderung speichern"):
+                df_p.loc[df_p["Name"] == p_edit, "Ziel_Kcal"] = neues_ziel
+                speichere_df_gs(df_p, "patienten")
+                st.success(f"Ziel für {p_edit} auf {neues_ziel} kcal aktualisiert!")
                 st.rerun()
-    with t2:
-        st.dataframe(df_p, use_container_width=True)
+        else:
+            st.write("Keine Daten zum Bearbeiten vorhanden.")
+
+    # --- TAB 4: LÖSCHEN / ENTLASSEN ---
+    with tab_loeschen:
+        if not df_p.empty:
+            p_del = st.selectbox("Welchen Patienten entlassen?", df_p["Name"], key="del_select")
+            st.warning(f"Achtung: Das Löschen von {p_del} kann nicht rückgängig gemacht werden.")
+            
+            if st.button(f"{p_del} unwiderruflich löschen"):
+                df_p = df_p[df_p["Name"] != p_del]
+                speichere_df_gs(df_p, "patienten")
+                st.success(f"Patient {p_del} wurde aus dem System entfernt.")
+                st.rerun()
 
 # --- MODUL 4: DATENBANK BEARBEITEN (Mit Typ-Auswahl) ---
 elif menu == "4. Datenbank bearbeiten":
@@ -223,3 +280,4 @@ elif menu == "4. Datenbank bearbeiten":
                 df_db = pd.concat([df_db, new_row], ignore_index=True)
                 speichere_df_gs(df_db, "lebensmittel")
                 st.rerun()
+
