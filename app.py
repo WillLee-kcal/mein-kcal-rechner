@@ -194,57 +194,57 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-# --- MODUL 4: DATENBANK (ROBUSTER EDITOR) ---
+# --- MODUL 4: DATENBANK (EDITIERBAR & IMPORT) ---
 elif menu == "4. Datenbank (Editierbar)":
-    st.header("📊 Lebensmittel-Datenbank Editor")
-    df_db = lade_daten_gs("lebensmittel")
+    st.header("📊 Lebensmittel-Datenbank & Import")
     
-    if not df_db.empty:
-        # Sicherheits-Check für Spaltennamen (Casing-Schutz)
-        # Wir suchen die Spalte und benennen sie ggf. einheitlich um
-        cols_aktuell = df_db.columns.tolist()
-        mapping = {
-            "kcal_100g": "kcal_100g",
-            "stueck_gewicht": "stueck_gewicht",
-            "kcal_pro_Einheit": "kcal_pro_Einheit"
-        }
-        
-        # Falls Spalten klein geschrieben sind, finden wir sie hier
-        for c in cols_aktuell:
-            if c.lower() == "kcal_pro_einheit": mapping["kcal_pro_Einheit"] = c
-            if c.lower() == "kcal_100g": mapping["kcal_100g"] = c
-            if c.lower() == "stueck_gewicht": mapping["stueck_gewicht"] = c
-
-        # Zahlen-Konvertierung
-        for key, real_col in mapping.items():
-            if real_col in df_db.columns:
-                df_db[real_col] = pd.to_numeric(df_db[real_col], errors='coerce').fillna(0)
-            else:
-                # Falls Spalte komplett fehlt, legen wir sie leer an
-                df_db[key] = 0.0
-
-        st.info("💡 Klicke doppelt zum Editieren. Änderungen müssen gespeichert werden.")
-        
-        edited_df = st.data_editor(
-            df_db, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Name": st.column_config.TextColumn("Bezeichnung"),
-                mapping.get("kcal_100g", "kcal_100g"): st.column_config.NumberColumn("kcal/100g", format="%.1f"),
-                mapping.get("stueck_gewicht", "stueck_gewicht"): st.column_config.NumberColumn("Gewicht (g)", format="%.1f"),
-                mapping.get("kcal_pro_Einheit", "kcal_pro_Einheit"): st.column_config.NumberColumn("kcal/Einheit", format="%.1f"),
-                "Typ": st.column_config.SelectboxColumn("Typ", options=["Intern", "Extern"])
-            },
-            key="db_full_editor"
-        )
-        
-        if st.button("💾 Alle Änderungen in Google Sheets speichern"):
-            with st.spinner("Synchronisiere Datenbank..."):
+    tab_editor, tab_import = st.tabs(["✏️ Datenbank-Editor", "🌍 Externer Import (OFF)"])
+    
+    with tab_editor:
+        df_db = lade_daten_gs("lebensmittel")
+        if not df_db.empty:
+            # Datentyp-Fix wie zuvor
+            df_db["kcal_100g"] = pd.to_numeric(df_db["kcal_100g"], errors='coerce').fillna(0)
+            df_db["stueck_gewicht"] = pd.to_numeric(df_db["stueck_gewicht"], errors='coerce').fillna(0)
+            
+            st.info("💡 Änderungen hier werden erst durch 'Speichern' permanent.")
+            edited_df = st.data_editor(df_db, num_rows="dynamic", use_container_width=True, hide_index=True, key="db_edit_main")
+            
+            if st.button("💾 Alle Änderungen speichern"):
                 speichere_df_gs(edited_df, "lebensmittel")
-                st.success("Erfolgreich aktualisiert!")
+                st.success("Datenbank aktualisiert!")
                 st.rerun()
-    else:
-        st.error("Datenbank konnte nicht geladen werden.")
 
+    with tab_import:
+        st.subheader("Produkte weltweit suchen")
+        suche_begriff = st.text_input("Markenprodukt suchen (z.B. 'Snickers' oder 'Dr. Oetker'):")
+        
+        if suche_begriff:
+            with st.spinner("Suche in Open Food Facts..."):
+                off_api = openfoodfacts.API(user_agent="KcalTrackerKlinik/1.0")
+                results = off_api.product.text_search(suche_begriff)
+                
+                if results and 'products' in results:
+                    products = results['products'][:10] # Top 10 Ergebnisse
+                    
+                    for p in products:
+                        p_name = p.get('product_name', 'Unbekannt')
+                        p_brand = p.get('brands', 'Keine Marke')
+                        nutriments = p.get('nutriments', {})
+                        p_kcal = nutriments.get('energy-kcal_100g')
+                        
+                        if p_kcal is not None:
+                            col_a, col_b = st.columns([3, 1])
+                            col_a.write(f"**{p_name}** ({p_brand}) - {p_kcal} kcal/100g")
+                            
+                            # Import-Button für dieses spezifische Produkt
+                            if col_b.button("📥 Importieren", key=f"import_{p.get('_id')}"):
+                                # In eigene DB übernehmen
+                                neue_zeile = [p_name, p_kcal, 0, 0, "1 Stück", "Extern"]
+                                speichere_zeile_gs(neue_zeile, "lebensmittel")
+                                st.success(f"'{p_name}' wurde deiner Liste hinzugefügt!")
+                                st.rerun()
+                        else:
+                            st.write(f"⚪ {p_name} - (Keine Kcal-Daten verfügbar)")
+                else:
+                    st.error("Keine Produkte gefunden.")
