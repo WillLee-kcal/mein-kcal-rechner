@@ -5,13 +5,26 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 from datetime import datetime
 
-# --- KONSTANTEN ---
-MAHLZEITEN_LISTE = [
-    "Frühstück", "Zwischenmahlzeit 1", "Mittagessen", 
-    "Zwischenmahlzeit 2", "Abendessen", "Zwischenmahlzeit 3"
-]
+# --- 1. SETUP & TURBO-CACHING ---
 
-# --- 1. SETUP & VERBINDUNG ---
+# Diese Funktion merkt sich die Daten für 10 Minuten (600 Sekunden)
+@st.cache_data(ttl=600)
+def lade_daten_gs_cached(sheet_name):
+    client = get_gsheet_client()
+    if client:
+        try:
+            sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
+            data = sheet.get_all_records()
+            df = pd.DataFrame(data)
+            df.columns = df.columns.str.strip()
+            return df
+        except: return pd.DataFrame()
+    return pd.DataFrame()
+
+# Die originale Lade-Funktion nutzen wir jetzt über den Cache
+def lade_daten_gs(sheet_name):
+    return lade_daten_gs_cached(sheet_name)
+
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -26,22 +39,12 @@ def get_gsheet_client():
         st.error(f"Verbindung fehlgeschlagen: {e}")
         return None
 
-def lade_daten_gs(sheet_name):
-    client = get_gsheet_client()
-    if client:
-        try:
-            sheet = client.open("Kcal_Datenbank").worksheet(sheet_name)
-            data = sheet.get_all_records()
-            df = pd.DataFrame(data)
-            df.columns = df.columns.str.strip()
-            return df
-        except: return pd.DataFrame()
-    return pd.DataFrame()
-
 def speichere_zeile_gs(liste_werte, sheet_name):
     try:
         client = get_gsheet_client()
         client.open("Kcal_Datenbank").worksheet(sheet_name).append_row(liste_werte)
+        # WICHTIG: Cache leeren, damit die neuen Daten sofort sichtbar sind!
+        st.cache_data.clear()
     except: st.error("Fehler beim Speichern.")
 
 def speichere_df_gs(df, sheet_name):
@@ -51,7 +54,11 @@ def speichere_df_gs(df, sheet_name):
         sheet.clear()
         df_clean = df.fillna("")
         sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
+        # WICHTIG: Cache leeren!
+        st.cache_data.clear()
     except: st.error("Fehler beim Update.")
+
+# ... (Der Rest des Codes für die Module bleibt gleich)
 
 # --- 2. LAYOUT & NAVIGATION ---
 st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="📈")
@@ -230,6 +237,7 @@ elif menu == "4. Datenbank-Info":
     df_db = lade_daten_gs("lebensmittel")
     if not df_db.empty:
         st.dataframe(df_db, use_container_width=True, hide_index=True)
+
 
 
 
