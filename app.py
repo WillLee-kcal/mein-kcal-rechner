@@ -93,7 +93,6 @@ if menu == "1. Mahlzeit erfassen":
             k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
             stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
             
-            # Flexible Suche nach Referenzwert
             k_ref = 0
             for col in ["kcal_pro_Einheit", "Kcal_pro_Einheit"]:
                 if col in item:
@@ -210,19 +209,20 @@ elif menu == "3. Patientenverwaltung":
                 speichere_df_gs(df_p, "patienten")
                 st.rerun()
 
-# --- MODUL 4: DATENBANK (EDITIERBAR & IMPORT) ---
+# --- MODUL 4: DATENBANK (EDITIERBAR, IMPORT & LÖSCHEN) ---
 elif menu == "4. Datenbank (Editierbar)":
-    st.header("📊 Lebensmittel-Datenbank & Import")
-    t_edit, t_imp = st.tabs(["✏️ Datenbank-Editor", "🌍 Externer Import (OFF)"])
+    st.header("📊 Lebensmittel-Datenbank")
+    t_edit, t_imp, t_del_food = st.tabs(["✏️ Datenbank-Editor", "🌍 Externer Import (OFF)", "🗑️ Lebensmittel löschen"])
+    
+    # Datenbank für alle Reiter laden
+    df_db = lade_daten_gs("lebensmittel")
     
     with t_edit:
-        df_db = lade_daten_gs("lebensmittel")
         if not df_db.empty:
             # Datentypen für Editor erzwingen
             df_db["kcal_100g"] = pd.to_numeric(df_db["kcal_100g"], errors='coerce').fillna(0)
             df_db["stueck_gewicht"] = pd.to_numeric(df_db["stueck_gewicht"], errors='coerce').fillna(0)
             
-            # Suche nach der Kcal_pro_Einheit Spalte zum Konvertieren
             for c in ["kcal_pro_Einheit", "Kcal_pro_Einheit"]:
                 if c in df_db.columns:
                     df_db[c] = pd.to_numeric(df_db[c], errors='coerce').fillna(0)
@@ -250,8 +250,23 @@ elif menu == "4. Datenbank (Editierbar)":
                         col_a, col_b = st.columns([3, 1])
                         col_a.write(f"**{p_name}** ({p_brand}) - {p_kcal} kcal/100g")
                         if col_b.button("📥 Import", key=f"imp_{p.get('_id')}"):
-                            # REIHENFOLGE: [Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ]
                             neue_zeile = [p_name, p_kcal, 0, "1 Stück", 0, "Extern"]
                             speichere_zeile_gs(neue_zeile, "lebensmittel")
                             st.success(f"{p_name} hinzugefügt!")
                             st.rerun()
+
+    with t_del_food:
+        st.subheader("Eintrag aus Datenbank entfernen")
+        if not df_db.empty:
+            food_to_delete = st.selectbox("Lebensmittel zum Löschen wählen:", ["Bitte wählen..."] + sorted(df_db["Name"].unique()))
+            
+            if food_to_delete != "Bitte wählen...":
+                st.warning(f"Soll '{food_to_delete}' wirklich gelöscht werden?")
+                if st.button(f"🗑️ '{food_to_delete}' endgültig löschen", type="primary"):
+                    # Eintrag filtern und speichern
+                    df_db_new = df_db[df_db["Name"] != food_to_delete]
+                    speichere_df_gs(df_db_new, "lebensmittel")
+                    st.success(f"'{food_to_delete}' wurde erfolgreich gelöscht.")
+                    st.rerun()
+        else:
+            st.info("Die Datenbank ist aktuell leer.")
