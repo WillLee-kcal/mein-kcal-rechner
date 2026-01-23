@@ -5,15 +5,34 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 from datetime import datetime
 import openfoodfacts
+import base64
 
 # --- KONSTANTEN ---
-MAHLZEITEN_LISTE = [
-    "Frühstück", "Zwischenmahlzeit 1", "Mittagessen", 
-    "Zwischenmahlzeit 2", "Abendessen", "Zwischenmahlzeit 3"
-]
+MAHLZEITEN_LISTE = ["Frühstück", "Zwischenmahlzeit 1", "Mittagessen", "Zwischenmahlzeit 2", "Abendessen", "Zwischenmahlzeit 3"]
+
+# --- SOUND FUNKTIONEN ---
+def play_sound(sound_type="success"):
+    # Einfache Töne via Base64 (Success: kurzer hoher Ton, Error: tieferer Ton)
+    sounds = {
+        "success": "https://www.soundjay.com/buttons/sounds/button-37a.mp3",
+        "save": "https://www.soundjay.com/buttons/sounds/button-09a.mp3",
+        "error": "https://www.soundjay.com/buttons/sounds/button-10.mp3"
+    }
+    audio_html = f'<audio autoplay><source src="{sounds[sound_type]}" type="audio/mp3"></audio>'
+    st.components.v1.html(audio_html, height=0)
+
+# --- CSS FÜR KLINISCHEN LOOK ---
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { border-radius: 8px; border: none; transition: 0.3s; }
+    .stButton>button:hover { background-color: #007bff; color: white; transform: scale(1.02); }
+    .stMetric { background-color: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    div[data-testid="stExpander"] { border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; margin-bottom: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
 
 # --- 1. SETUP & VERBINDUNG ---
-
 def get_gsheet_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     try:
@@ -49,7 +68,10 @@ def speichere_zeile_gs(liste_werte, sheet_name):
         client = get_gsheet_client()
         client.open("Kcal_Datenbank").worksheet(sheet_name).append_row(liste_werte)
         st.cache_data.clear() 
-    except: st.error("Fehler beim Speichern.")
+        play_sound("success")
+    except: 
+        play_sound("error")
+        st.error("Fehler beim Speichern.")
 
 def speichere_df_gs(df, sheet_name):
     try:
@@ -59,73 +81,65 @@ def speichere_df_gs(df, sheet_name):
         df_clean = df.fillna("")
         sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
         st.cache_data.clear() 
+        play_sound("save")
     except Exception as e: 
+        play_sound("error")
         st.error(f"Fehler beim Update: {e}")
 
 # --- 2. LAYOUT & NAVIGATION ---
-st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="📈")
-st.sidebar.title("🍎 Navigation")
-menu = st.sidebar.radio("Menü wählen:", [
-    "1. Mahlzeit erfassen", 
-    "2. Patienten-Dashboard", 
-    "3. Patientenverwaltung", 
-    "4. Datenbank (Editierbar)"
-])
+st.set_page_config(page_title="Kcal Tracker Pro", layout="wide", page_icon="🩹")
+st.sidebar.markdown("<h2 style='color: #007bff;'>🩺 Med-Log Pro</h2>", unsafe_allow_html=True)
+menu = st.sidebar.radio("Navigation:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Zentrale"])
 
 # --- MODUL 1: MAHLZEIT ERFASSEN ---
 if menu == "1. Mahlzeit erfassen":
-    st.header("⚖️ Mahlzeit ins Logbuch eintragen")
+    st.header("⚖️ Ernährungs-Protokoll")
     df_db = lade_daten_gs("lebensmittel")
     df_p = lade_daten_gs("patienten")
     
     if not df_p.empty and not df_db.empty:
-        c1, c2 = st.columns(2)
-        with c1:
-            p_wahl = st.selectbox("1. Patient wählen:", df_p["Name"])
-            m_zeit = st.selectbox("2. Mahlzeit wählen:", MAHLZEITEN_LISTE)
-            st.write("---")
-            auswahl_typ = st.radio("3. Kategorie filtern:", ["Intern", "Extern", "Alle"], horizontal=True)
-            df_gefiltert = df_db if auswahl_typ == "Alle" else df_db[df_db['Typ'] == auswahl_typ]
-            lebensmittel_wahl = st.selectbox("4. Lebensmittel wählen:", ["Bitte wählen..."] + list(df_gefiltert['Name'].unique()))
+        with st.container():
+            c1, c2 = st.columns(2)
+            with c1:
+                p_wahl = st.selectbox("👤 Patient wählen:", df_p["Name"])
+                m_zeit = st.selectbox("⏰ Mahlzeit:", MAHLZEITEN_LISTE)
+                st.divider()
+                auswahl_typ = st.radio("Kategorie filter:", ["Intern", "Extern", "Alle"], horizontal=True)
+                df_gefiltert = df_db if auswahl_typ == "Alle" else df_db[df_db['Typ'] == auswahl_typ]
+                lebensmittel_wahl = st.selectbox("🍎 Lebensmittel:", ["Bitte wählen..."] + list(df_gefiltert['Name'].unique()))
 
-        if lebensmittel_wahl != "Bitte wählen...":
-            item = df_db[df_db['Name'] == lebensmittel_wahl].iloc[0]
-            k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
-            stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
-            
-            k_ref = 0
-            for col in ["kcal_pro_Einheit", "Kcal_pro_Einheit"]:
-                if col in item:
-                    k_ref = pd.to_numeric(item[col], errors='coerce') or 0
-                    break
-
-            with c2:
+            if lebensmittel_wahl != "Bitte wählen...":
+                item = df_db[df_db['Name'] == lebensmittel_wahl].iloc[0]
+                k100 = pd.to_numeric(item.get('kcal_100g', 0), errors='coerce') or 0
+                stk_w = pd.to_numeric(item.get('stueck_gewicht', 0), errors='coerce') or 0
                 std_m = item.get('Standard_Menge', '1 Stück')
-                st.info(f"📋 **Referenz:** {std_m} ≈ {k_ref} kcal")
-                menge = st.number_input(f"Anzahl / Menge ({std_m}):", min_value=0.0, step=0.5, value=1.0)
-                basis = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"])
-                
-                gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
-                kcal_total = (k100 / 100) * gewicht
-                st.metric("Berechnetes Ergebnis", f"{kcal_total:.1f} kcal")
-                
-                if st.button("💾 In Logbuch speichern"):
-                    heute = datetime.now().strftime("%Y-%m-%d")
-                    speichere_zeile_gs([heute, p_wahl, m_zeit, lebensmittel_wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
-                    st.success(f"Eintrag gespeichert!")
+
+                with c2:
+                    st.info(f"**Referenz:** {std_m} ≈ {item.get('kcal_pro_Einheit', 0)} kcal")
+                    menge = st.number_input(f"Menge ({std_m}):", min_value=0.0, step=0.5, value=1.0)
+                    basis = st.radio("Berechnungsgrundlage:", ["Stück / Einheit", "Gramm"], horizontal=True)
+                    gewicht = menge * stk_w if basis == "Stück / Einheit" else menge
+                    kcal_total = (k100 / 100) * gewicht
+                    st.metric("Berechnete Energie", f"{kcal_total:.1f} kcal")
+                    
+                    if st.button("💾 Speichern & Quittieren", use_container_width=True):
+                        heute = datetime.now().strftime("%Y-%m-%d")
+                        speichere_zeile_gs([heute, p_wahl, m_zeit, lebensmittel_wahl, round(gewicht,1), round(kcal_total,1)], "verzehr")
+                        st.balloons()
+                        st.success(f"Eintrag für {p_wahl} erfolgreich!")
 
 # --- MODUL 2: DASHBOARD ---
 elif menu == "2. Patienten-Dashboard":
-    st.header("📊 Therapie-Dashboard & Verlauf")
+    st.header("📊 Therapie-Zentrale")
     df_v = lade_daten_gs("verzehr")
     df_p = lade_daten_gs("patienten")
     df_g = lade_daten_gs("gewichtsverlauf")
     
     if not df_p.empty:
-        p_wahl = st.selectbox("Patient wählen:", df_p["Name"])
+        p_wahl = st.selectbox("Patientenakte wählen:", df_p["Name"])
         p_data = df_p[df_p["Name"] == p_wahl].iloc[0]
         
-        t_kcal, t_trend = st.tabs(["🍎 Kalorien heute", "📈 Gewichtsverlauf"])
+        t_kcal, t_trend = st.tabs(["⚡ Kalorien-Status", "📈 Gewichtsverlauf"])
         
         with t_kcal:
             heute = datetime.now().strftime("%Y-%m-%d")
@@ -136,9 +150,13 @@ elif menu == "2. Patienten-Dashboard":
                 ziel = pd.to_numeric(p_data["Ziel_Kcal"], errors='coerce') or 2000
                 
                 c1, c2 = st.columns(2)
-                c1.metric("Heute verzehrt", f"{gegessen:.0f} kcal")
+                # Farblogik für Metrik
+                status_color = "normal" if gegessen < ziel else "inverse"
+                c1.metric("Heute verzehrt", f"{gegessen:.0f} kcal", delta=f"{gegessen-ziel:.0f} Diff", delta_color=status_color)
                 c2.metric("Tagesziel", f"{ziel:.0f} kcal")
-                st.progress(min(gegessen/ziel, 1.0) if ziel > 0 else 0)
+                
+                progress = min(gegessen/ziel, 1.0) if ziel > 0 else 0
+                st.progress(progress)
                 
                 for m in MAHLZEITEN_LISTE:
                     m_data = df_heute[df_heute["Mahlzeit"] == m]
@@ -161,112 +179,42 @@ elif menu == "2. Patienten-Dashboard":
                     df_hist["Datum"] = pd.to_datetime(df_hist["Datum"])
                     df_hist = df_hist.sort_values("Datum")
                     st.line_chart(df_hist.set_index("Datum")["Gewicht"])
-            
-            with st.expander("➕ Neues Gewicht loggen"):
-                neu_date = st.date_input("Wiegedatum:", value=datetime.now())
-                neu_w = st.number_input("Gewicht (kg):", step=0.1)
-                if st.button("Gewicht speichern"):
-                    speichere_zeile_gs([str(neu_date), p_wahl, neu_w], "gewichtsverlauf")
-                    st.rerun()
 
-# --- MODUL 3: PATIENTENVERWALTUNG ---
-elif menu == "3. Patientenverwaltung":
-    st.header("👥 Patientenverwaltung")
-    df_p = lade_daten_gs("patienten")
-    t_list, t_new, t_copy, t_del = st.tabs(["📋 Liste", "➕ Neu", "👯 Kopieren", "🗑️ Löschen"])
+# --- MODUL 4: DATENBANK (EDITIERBAR & IMPORT) ---
+elif menu == "4. Datenbank-Zentrale":
+    st.header("🗄️ Stammdaten-Management")
+    t_edit, t_imp, t_del_food = st.tabs(["✏️ Editor", "🌍 OFF-Import", "🗑️ Löschen"])
     
-    with t_list:
-        if not df_p.empty: st.dataframe(df_p, use_container_width=True, hide_index=True)
-    
-    with t_new:
-        with st.form("p_new"):
-            n = st.text_input("Name")
-            z = st.number_input("Ziel Kcal", value=2000)
-            if st.form_submit_button("Speichern"):
-                heute = datetime.now().strftime("%Y-%m-%d")
-                new_p = pd.DataFrame([[n, z, "", "", 165, "P25", 0, heute]], columns=df_p.columns)
-                df_p = pd.concat([df_p, new_p], ignore_index=True)
-                speichere_df_gs(df_p, "patienten")
-                st.rerun()
-
-    with t_copy:
-        if not df_p.empty:
-            p_vor = st.selectbox("Vorlage:", df_p["Name"])
-            v_d = df_p[df_p["Name"] == p_vor].iloc[0]
-            new_n = st.text_input("Neuer Name")
-            if st.button("Kopie erstellen"):
-                heute = datetime.now().strftime("%Y-%m-%d")
-                new_p = pd.DataFrame([[new_n, v_d['Ziel_Kcal'], v_d['Geschlecht'], v_d['Geburtsdatum'], v_d['Groesse_cm'], v_d['Ziel_Perzentile'], 0, heute]], columns=df_p.columns)
-                df_p = pd.concat([df_p, new_p], ignore_index=True)
-                speichere_df_gs(df_p, "patienten")
-                st.rerun()
-
-    with t_del:
-        if not df_p.empty:
-            p_kill = st.selectbox("Patient löschen:", df_p["Name"])
-            if st.button(f"Unwiderruflich löschen: {p_kill}", type="primary"):
-                df_p = df_p[df_p["Name"] != p_kill]
-                speichere_df_gs(df_p, "patienten")
-                st.rerun()
-
-# --- MODUL 4: DATENBANK (EDITIERBAR, IMPORT & LÖSCHEN) ---
-elif menu == "4. Datenbank (Editierbar)":
-    st.header("📊 Lebensmittel-Datenbank")
-    t_edit, t_imp, t_del_food = st.tabs(["✏️ Datenbank-Editor", "🌍 Externer Import (OFF)", "🗑️ Lebensmittel löschen"])
-    
-    # Datenbank für alle Reiter laden
     df_db = lade_daten_gs("lebensmittel")
     
     with t_edit:
         if not df_db.empty:
-            # Datentypen für Editor erzwingen
             df_db["kcal_100g"] = pd.to_numeric(df_db["kcal_100g"], errors='coerce').fillna(0)
             df_db["stueck_gewicht"] = pd.to_numeric(df_db["stueck_gewicht"], errors='coerce').fillna(0)
-            
-            for c in ["kcal_pro_Einheit", "Kcal_pro_Einheit"]:
-                if c in df_db.columns:
-                    df_db[c] = pd.to_numeric(df_db[c], errors='coerce').fillna(0)
-
-            edited_df = st.data_editor(df_db, num_rows="dynamic", use_container_width=True, hide_index=True, key="main_db_editor")
-            if st.button("💾 Alle Änderungen speichern"):
+            edited_df = st.data_editor(df_db, num_rows="dynamic", use_container_width=True, hide_index=True)
+            if st.button("💾 Datenbank-Update"):
                 speichere_df_gs(edited_df, "lebensmittel")
-                st.success("Datenbank aktualisiert!")
-                st.rerun()
+                st.success("Synchronisierung abgeschlossen!")
 
     with t_imp:
-        st.subheader("Produkte weltweit suchen")
-        suche = st.text_input("Markenprodukt suchen (z.B. 'Snickers'):")
+        suche = st.text_input("Markenprodukt via Open Food Facts suchen:")
         if suche:
             off_api = openfoodfacts.API(user_agent="KcalTracker/1.0")
             res = off_api.product.text_search(suche)
             if res and 'products' in res:
-                for p in res['products'][:10]:
+                for p in res['products'][:5]:
                     p_name = p.get('product_name', 'Unbekannt')
-                    p_brand = p.get('brands', 'Diverse')
-                    nutriments = p.get('nutriments', {})
-                    p_kcal = nutriments.get('energy-kcal_100g')
-                    
-                    if p_kcal is not None:
-                        col_a, col_b = st.columns([3, 1])
-                        col_a.write(f"**{p_name}** ({p_brand}) - {p_kcal} kcal/100g")
-                        if col_b.button("📥 Import", key=f"imp_{p.get('_id')}"):
-                            neue_zeile = [p_name, p_kcal, 0, "1 Stück", 0, "Extern"]
-                            speichere_zeile_gs(neue_zeile, "lebensmittel")
-                            st.success(f"{p_name} hinzugefügt!")
+                    p_kcal = p.get('nutriments', {}).get('energy-kcal_100g')
+                    if p_kcal:
+                        ca, cb = st.columns([3, 1])
+                        ca.write(f"**{p_name}** ({p_kcal} kcal/100g)")
+                        if cb.button("📥 Import", key=f"imp_{p.get('_id')}"):
+                            speichere_zeile_gs([p_name, p_kcal, 0, "1 Stück", 0, "Extern"], "lebensmittel")
                             st.rerun()
-
+                            
     with t_del_food:
-        st.subheader("Eintrag aus Datenbank entfernen")
         if not df_db.empty:
-            food_to_delete = st.selectbox("Lebensmittel zum Löschen wählen:", ["Bitte wählen..."] + sorted(df_db["Name"].unique()))
-            
-            if food_to_delete != "Bitte wählen...":
-                st.warning(f"Soll '{food_to_delete}' wirklich gelöscht werden?")
-                if st.button(f"🗑️ '{food_to_delete}' endgültig löschen", type="primary"):
-                    # Eintrag filtern und speichern
-                    df_db_new = df_db[df_db["Name"] != food_to_delete]
-                    speichere_df_gs(df_db_new, "lebensmittel")
-                    st.success(f"'{food_to_delete}' wurde erfolgreich gelöscht.")
-                    st.rerun()
-        else:
-            st.info("Die Datenbank ist aktuell leer.")
+            kill = st.selectbox("Eintrag entfernen:", ["Bitte wählen..."] + sorted(df_db["Name"].unique()))
+            if kill != "Bitte wählen..." and st.button("🗑️ Endgültig löschen", type="primary"):
+                speichere_df_gs(df_db[df_db["Name"] != kill], "lebensmittel")
+                st.rerun()
