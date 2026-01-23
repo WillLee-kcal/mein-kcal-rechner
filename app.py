@@ -14,17 +14,80 @@ MAHLZEITEN_LISTE = ["Frühstück", "Zwischenmahlzeit 1", "Mittagessen", "Zwische
 
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="🩺")
 
-# Clinical Medical Blue Styling
+# --- 1. NEUES, DEZENTES STYLING ---
 st.markdown(f"""
     <style>
-    [data-testid="stSidebar"] {{ background-color: #004a99; }}
-    [data-testid="stSidebar"] * {{ color: white !important; }}
-    .stButton>button {{ border-radius: 12px; background-color: #007bff; color: white; border: none; font-weight: bold; width: 100%; transition: 0.2s; }}
-    .stButton>button:hover {{ background-color: #0056b3; transform: scale(1.01); }}
-    .stMetric {{ background-color: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
-    .ai-box {{ background-color: #f0f7ff; padding: 20px; border-radius: 15px; border: 1px solid #007bff; margin-bottom: 20px; }}
+    /* Sidebar in dezentem Hellgrau/Blau */
+    [data-testid="stSidebar"] {{
+        background-color: #f8f9fa;
+        border-right: 1px solid #dee2e6;
+    }}
+    /* Schrift in der Sidebar wieder dunkel für beste Lesbarkeit */
+    [data-testid="stSidebar"] * {{
+        color: #212529 !important;
+    }}
+    /* Buttons mit sanfterem Blau */
+    .stButton>button {{
+        border-radius: 8px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+    }}
+    /* AI Box etwas dezenter */
+    .ai-box {{
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #007bff;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }}
     </style>
     """, unsafe_allow_html=True)
+
+# --- MODUL 1: MAHLZEIT ERFASSEN (Optimiert mit "Alle Speichern") ---
+if menu == "1. Mahlzeit erfassen":
+    st.header("⚖️ Ernährungs-Protokoll")
+    df_db, df_p = lade_daten_gs("lebensmittel"), lade_daten_gs("patienten")
+    
+    t_man, t_ai = st.tabs(["📝 Manuell", "🤖 AI Smart-Input"])
+    
+    # ... (Manueller Teil bleibt gleich)
+
+    with t_ai:
+        st.markdown('<div class="ai-box">', unsafe_allow_html=True)
+        ai_input = st.text_area("Was wurde verzehrt?", placeholder="z.B. Zwei Snickers und 200ml Apfelsaft")
+        c1, c2 = st.columns(2)
+        p_wahl_ai = c1.selectbox("Patient:", df_p["Name"], key="p_ai")
+        m_zeit_ai = c2.selectbox("Mahlzeit:", MAHLZEITEN_LISTE, key="m_ai")
+        
+        if st.button("🚀 AI Analyse"):
+            if ai_input:
+                with st.spinner("KI verarbeitet Daten..."):
+                    st.session_state.ai_ergebnisse = ai_analyse_ernaehrung(ai_input, df_db["Name"].tolist())
+        
+        if "ai_ergebnisse" in st.session_state and st.session_state.ai_ergebnisse:
+            st.write("---")
+            # NEU: ALLE SPEICHERN BUTTON
+            if st.button("📥 ALLE Ergebnisse auf einmal speichern", type="primary"):
+                for res in st.session_state.ai_ergebnisse:
+                    item_n = res.get("item")
+                    match = df_db[df_db["Name"] == item_n]
+                    if not match.empty:
+                        row = match.iloc[0]
+                        stk_w = pd.to_numeric(row['stueck_gewicht']) or 1
+                        gew = res.get("menge") * (stk_w if res.get("basis")=="Stück" else 1)
+                        kcal = (pd.to_numeric(row['kcal_100g'])/100)*gew
+                        speichere_zeile_gs([str(datetime.now().date()), p_wahl_ai, m_zeit_ai, item_n, round(gew,1), round(kcal,1)], "verzehr")
+                st.session_state.ai_ergebnisse = [] # Liste leeren nach Speichern
+                st.rerun()
+
+            # Einzelliste (wie bisher)
+            for idx, res in enumerate(st.session_state.ai_ergebnisse):
+                # ... (Logik zur Einzelanzeige wie zuvor)
+                st.write(f"🔹 {res.get('item')} ({res.get('menge')} {res.get('basis')})")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 2. HILFSFUNKTIONEN (SOUND & DB) ---
 def trigger_feedback(type="success"):
@@ -271,5 +334,6 @@ elif menu == "4. Datenbank-Zentrale":
             kill = st.selectbox("Lebensmittel löschen:", ["Wählen..."] + sorted(df_db["Name"].unique()))
             if kill != "Wählen..." and st.button("🗑️ Löschen", type="primary"):
                 speichere_df_gs(df_db[df_db["Name"] != kill], "lebensmittel"); st.rerun()
+
 
 
