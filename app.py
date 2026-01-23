@@ -14,82 +14,40 @@ MAHLZEITEN_LISTE = ["Frühstück", "Zwischenmahlzeit 1", "Mittagessen", "Zwische
 
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="🩺")
 
-# --- 1. NEUES, DEZENTES STYLING ---
+# --- 2. DEZENTES "MEDICAL SOFT" DESIGN ---
 st.markdown(f"""
     <style>
-    /* Sidebar in dezentem Hellgrau/Blau */
     [data-testid="stSidebar"] {{
         background-color: #f8f9fa;
         border-right: 1px solid #dee2e6;
     }}
-    /* Schrift in der Sidebar wieder dunkel für beste Lesbarkeit */
     [data-testid="stSidebar"] * {{
         color: #212529 !important;
     }}
-    /* Buttons mit sanfterem Blau */
     .stButton>button {{
         border-radius: 8px;
         background-color: #007bff;
         color: white;
         border: none;
-        padding: 8px 16px;
     }}
-    /* AI Box etwas dezenter */
+    .stMetric {{
+        background-color: white;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }}
     .ai-box {{
         background-color: #ffffff;
         padding: 20px;
         border-radius: 12px;
         border: 1px solid #007bff;
         box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
     }}
     </style>
     """, unsafe_allow_html=True)
 
-# --- MODUL 1: MAHLZEIT ERFASSEN (Optimiert mit "Alle Speichern") ---
-if menu == "1. Mahlzeit erfassen":
-    st.header("⚖️ Ernährungs-Protokoll")
-    df_db, df_p = lade_daten_gs("lebensmittel"), lade_daten_gs("patienten")
-    
-    t_man, t_ai = st.tabs(["📝 Manuell", "🤖 AI Smart-Input"])
-    
-    # ... (Manueller Teil bleibt gleich)
-
-    with t_ai:
-        st.markdown('<div class="ai-box">', unsafe_allow_html=True)
-        ai_input = st.text_area("Was wurde verzehrt?", placeholder="z.B. Zwei Snickers und 200ml Apfelsaft")
-        c1, c2 = st.columns(2)
-        p_wahl_ai = c1.selectbox("Patient:", df_p["Name"], key="p_ai")
-        m_zeit_ai = c2.selectbox("Mahlzeit:", MAHLZEITEN_LISTE, key="m_ai")
-        
-        if st.button("🚀 AI Analyse"):
-            if ai_input:
-                with st.spinner("KI verarbeitet Daten..."):
-                    st.session_state.ai_ergebnisse = ai_analyse_ernaehrung(ai_input, df_db["Name"].tolist())
-        
-        if "ai_ergebnisse" in st.session_state and st.session_state.ai_ergebnisse:
-            st.write("---")
-            # NEU: ALLE SPEICHERN BUTTON
-            if st.button("📥 ALLE Ergebnisse auf einmal speichern", type="primary"):
-                for res in st.session_state.ai_ergebnisse:
-                    item_n = res.get("item")
-                    match = df_db[df_db["Name"] == item_n]
-                    if not match.empty:
-                        row = match.iloc[0]
-                        stk_w = pd.to_numeric(row['stueck_gewicht']) or 1
-                        gew = res.get("menge") * (stk_w if res.get("basis")=="Stück" else 1)
-                        kcal = (pd.to_numeric(row['kcal_100g'])/100)*gew
-                        speichere_zeile_gs([str(datetime.now().date()), p_wahl_ai, m_zeit_ai, item_n, round(gew,1), round(kcal,1)], "verzehr")
-                st.session_state.ai_ergebnisse = [] # Liste leeren nach Speichern
-                st.rerun()
-
-            # Einzelliste (wie bisher)
-            for idx, res in enumerate(st.session_state.ai_ergebnisse):
-                # ... (Logik zur Einzelanzeige wie zuvor)
-                st.write(f"🔹 {res.get('item')} ({res.get('menge')} {res.get('basis')})")
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-# --- 2. HILFSFUNKTIONEN (SOUND & DB) ---
+# --- 3. HILFSFUNKTIONEN (DB & FEEDBACK) ---
 def trigger_feedback(type="success"):
     sounds = {"success": "https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3", 
               "error": "https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3"}
@@ -126,7 +84,6 @@ def speichere_zeile_gs(liste_werte, sheet_name):
         client.open("Kcal_Datenbank").worksheet(sheet_name).append_row(liste_werte)
         st.cache_data.clear()
         trigger_feedback("success")
-        st.toast("Eintrag gespeichert!", icon="✅")
     except: trigger_feedback("error")
 
 def speichere_df_gs(df, sheet_name):
@@ -138,43 +95,31 @@ def speichere_df_gs(df, sheet_name):
         sheet.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
         st.cache_data.clear()
         trigger_feedback("success")
-        st.toast("Datenbank synchronisiert!", icon="🔄")
     except: trigger_feedback("error")
 
-# --- 3. AI LOGIK ---
 def ai_analyse_ernaehrung(user_text, datenbank_liste):
     if not st.secrets.get("OPENAI_API_KEY"):
-        st.error("OpenAI API Key fehlt in den Secrets!")
+        st.error("API Key fehlt!")
         return None
-    
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     db_namen = ", ".join(datenbank_liste)
-    
-    prompt = f"""
-    Analysiere den Satz und extrahiere Lebensmittel/Mengen. Gleiche sie mit dieser Liste ab: {db_namen}.
-    Antworte NUR mit einem JSON-Objekt im Format: {{"items": [{{"item": "Name", "menge": 1.0, "basis": "Stück"}}]}}
-    Satz: "{user_text}"
-    """
+    prompt = f"Analysiere: '{user_text}'. Gleiche ab mit: {db_namen}. Gib NUR JSON zurück: {{\"items\": [{{ \"item\": \"Name\", \"menge\": 1.0, \"basis\": \"Stück\" }}]}}"
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={ "type": "json_object" }
-        )
+        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}], response_format={ "type": "json_object" })
         return json.loads(response.choices[0].message.content).get("items", [])
     except Exception as e:
-        st.error(f"AI-Fehler: {e}")
+        st.error(f"AI Fehler: {e}")
         return None
 
-# --- 4. NAVIGATION ---
+# --- 4. NAVIGATION (WICHTIG: Hier wird 'menu' definiert!) ---
 st.sidebar.markdown(f"# 🩺 {APP_NAME}")
+st.sidebar.markdown("---")
 menu = st.sidebar.radio("Navigation:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Zentrale"])
 
 # --- MODUL 1: MAHLZEIT ERFASSEN ---
 if menu == "1. Mahlzeit erfassen":
     st.header("⚖️ Ernährungs-Protokoll")
     df_db, df_p = lade_daten_gs("lebensmittel"), lade_daten_gs("patienten")
-    
     t_man, t_ai = st.tabs(["📝 Manuell", "🤖 AI Smart-Input"])
     
     with t_man:
@@ -187,7 +132,6 @@ if menu == "1. Mahlzeit erfassen":
             if lebensmittel != "Bitte wählen...":
                 item = df_db[df_db['Name'] == lebensmittel].iloc[0]
                 with c2:
-                    st.info(f"Ref: {item.get('Standard_Menge','1 Stk')} ≈ {item.get('kcal_pro_Einheit', 0)} kcal")
                     menge = st.number_input("Menge:", min_value=0.1, value=1.0)
                     basis = st.radio("Basis:", ["Stück / Einheit", "Gramm"], horizontal=True)
                     stk_w = pd.to_numeric(item.get('stueck_gewicht', 0)) or 1
@@ -196,56 +140,36 @@ if menu == "1. Mahlzeit erfassen":
                     st.metric("Energie", f"{kcal:.1f} kcal")
                     if st.button("💾 Speichern"):
                         speichere_zeile_gs([str(datetime.now().date()), p_wahl, m_zeit, lebensmittel, round(gew,1), round(kcal,1)], "verzehr")
+                        st.toast("Gespeichert!")
 
     with t_ai:
         st.markdown('<div class="ai-box">', unsafe_allow_html=True)
-        st.subheader("🤖 AI Smart-Input")
-        ai_input = st.text_area("Was wurde verzehrt?", placeholder="z.B. Zwei Snickers und 200ml Apfelsaft", key="ai_text_input")
-        
+        ai_input = st.text_area("Was wurde verzehrt?", placeholder="z.B. Zwei Snickers")
         c1, c2 = st.columns(2)
         p_wahl_ai = c1.selectbox("Patient:", df_p["Name"], key="p_ai")
         m_zeit_ai = c2.selectbox("Mahlzeit:", MAHLZEITEN_LISTE, key="m_ai")
         
-        # 1. ANALYSE-BUTTON
         if st.button("🚀 AI Analyse"):
             if ai_input:
-                with st.spinner("AI gleicht Daten mit Datenbank ab..."):
-                    # Wir speichern das Ergebnis im "Gedächtnis" (Session State)
+                with st.spinner("KI verarbeitet..."):
                     st.session_state.ai_ergebnisse = ai_analyse_ernaehrung(ai_input, df_db["Name"].tolist())
-            else:
-                st.warning("Bitte gib erst einen Text ein.")
 
-        # 2. ANZEIGE & SPEICHERN (Wird nur gezeigt, wenn Ergebnisse im Gedächtnis sind)
         if "ai_ergebnisse" in st.session_state and st.session_state.ai_ergebnisse:
-            st.write("---")
-            st.write("### Gefundene Lebensmittel:")
-            
-            for idx, res in enumerate(st.session_state.ai_ergebnisse):
-                item_n = res.get("item")
-                match = df_db[df_db["Name"] == item_n]
-                
-                if not match.empty:
-                    row = match.iloc[0]
-                    k100 = pd.to_numeric(row['kcal_100g'], errors='coerce') or 0
-                    stk_w = pd.to_numeric(row['stueck_gewicht'], errors='coerce') or 1
-                    
-                    # Berechnung
-                    m_wert = res.get("menge", 1)
-                    basis_txt = res.get("basis", "Stück")
-                    gew = m_wert * (stk_w if basis_txt == "Stück" else 1)
-                    kcal = (k100 / 100) * gew
-                    
-                    col_a, col_b = st.columns([3, 1])
-                    col_a.write(f"✅ **{item_n}**: {m_wert} {basis_txt} ({round(kcal)} kcal)")
-                    
-                    # Hier ist der wichtige Fix: Der Key muss absolut eindeutig sein (mit Index)
-                    if col_b.button("Speichern", key=f"btn_save_{idx}_{item_n}"):
+            st.divider()
+            if st.button("📥 ALLE Ergebnisse auf einmal speichern", type="primary"):
+                for res in st.session_state.ai_ergebnisse:
+                    item_n = res.get("item")
+                    match = df_db[df_db["Name"] == item_n]
+                    if not match.empty:
+                        row = match.iloc[0]
+                        gew = res.get("menge") * (pd.to_numeric(row['stueck_gewicht']) if res.get("basis")=="Stück" else 1)
+                        kcal = (pd.to_numeric(row['kcal_100g'])/100)*gew
                         speichere_zeile_gs([str(datetime.now().date()), p_wahl_ai, m_zeit_ai, item_n, round(gew,1), round(kcal,1)], "verzehr")
-                        # Optional: Ergebnis nach Speichern aus dem Gedächtnis löschen
-                        # st.session_state.ai_ergebnisse.pop(idx)
-                        # st.rerun()
-                else:
-                    st.warning(f"⚠️ '{item_n}' ist nicht in deiner Datenbank.")
+                st.session_state.ai_ergebnisse = []
+                st.rerun()
+
+            for idx, res in enumerate(st.session_state.ai_ergebnisse):
+                st.write(f"🔹 {res.get('item')} ({res.get('menge')} {res.get('basis')})")
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- MODUL 2: DASHBOARD ---
