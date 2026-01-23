@@ -136,27 +136,53 @@ if menu == "1. Mahlzeit erfassen":
 
     with t_ai:
         st.markdown('<div class="ai-box">', unsafe_allow_html=True)
-        ai_input = st.text_area("Was wurde verzehrt?", placeholder="z.B. Zwei Snickers und 200ml Apfelsaft")
+        st.subheader("🤖 AI Smart-Input")
+        ai_input = st.text_area("Was wurde verzehrt?", placeholder="z.B. Zwei Snickers und 200ml Apfelsaft", key="ai_text_input")
+        
         c1, c2 = st.columns(2)
         p_wahl_ai = c1.selectbox("Patient:", df_p["Name"], key="p_ai")
         m_zeit_ai = c2.selectbox("Mahlzeit:", MAHLZEITEN_LISTE, key="m_ai")
         
+        # 1. ANALYSE-BUTTON
         if st.button("🚀 AI Analyse"):
-            ergebnisse = ai_analyse_ernaehrung(ai_input, df_db["Name"].tolist())
-            if ergebnisse:
-                for res in ergebnisse:
-                    item_n = res.get("item")
-                    match = df_db[df_db["Name"] == item_n]
-                    if not match.empty:
-                        row = match.iloc[0]
-                        k100 = pd.to_numeric(row['kcal_100g'])
-                        gew = res.get("menge") * (pd.to_numeric(row['stueck_gewicht']) if res.get("basis")=="Stück" else 1)
-                        kcal = (k100/100)*gew
-                        col_a, col_b = st.columns([3, 1])
-                        col_a.write(f"✅ **{item_n}**: {res.get('menge')} {res.get('basis')} ({round(kcal)} kcal)")
-                        if col_b.button("Speichern", key=f"ai_sav_{item_n}"):
-                            speichere_zeile_gs([str(datetime.now().date()), p_wahl_ai, m_zeit_ai, item_n, gew, kcal], "verzehr")
-                    else: st.warning(f"'{item_n}' nicht in DB gefunden.")
+            if ai_input:
+                with st.spinner("AI gleicht Daten mit Datenbank ab..."):
+                    # Wir speichern das Ergebnis im "Gedächtnis" (Session State)
+                    st.session_state.ai_ergebnisse = ai_analyse_ernaehrung(ai_input, df_db["Name"].tolist())
+            else:
+                st.warning("Bitte gib erst einen Text ein.")
+
+        # 2. ANZEIGE & SPEICHERN (Wird nur gezeigt, wenn Ergebnisse im Gedächtnis sind)
+        if "ai_ergebnisse" in st.session_state and st.session_state.ai_ergebnisse:
+            st.write("---")
+            st.write("### Gefundene Lebensmittel:")
+            
+            for idx, res in enumerate(st.session_state.ai_ergebnisse):
+                item_n = res.get("item")
+                match = df_db[df_db["Name"] == item_n]
+                
+                if not match.empty:
+                    row = match.iloc[0]
+                    k100 = pd.to_numeric(row['kcal_100g'], errors='coerce') or 0
+                    stk_w = pd.to_numeric(row['stueck_gewicht'], errors='coerce') or 1
+                    
+                    # Berechnung
+                    m_wert = res.get("menge", 1)
+                    basis_txt = res.get("basis", "Stück")
+                    gew = m_wert * (stk_w if basis_txt == "Stück" else 1)
+                    kcal = (k100 / 100) * gew
+                    
+                    col_a, col_b = st.columns([3, 1])
+                    col_a.write(f"✅ **{item_n}**: {m_wert} {basis_txt} ({round(kcal)} kcal)")
+                    
+                    # Hier ist der wichtige Fix: Der Key muss absolut eindeutig sein (mit Index)
+                    if col_b.button("Speichern", key=f"btn_save_{idx}_{item_n}"):
+                        speichere_zeile_gs([str(datetime.now().date()), p_wahl_ai, m_zeit_ai, item_n, round(gew,1), round(kcal,1)], "verzehr")
+                        # Optional: Ergebnis nach Speichern aus dem Gedächtnis löschen
+                        # st.session_state.ai_ergebnisse.pop(idx)
+                        # st.rerun()
+                else:
+                    st.warning(f"⚠️ '{item_n}' ist nicht in deiner Datenbank.")
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- MODUL 2: DASHBOARD ---
@@ -245,4 +271,5 @@ elif menu == "4. Datenbank-Zentrale":
             kill = st.selectbox("Lebensmittel löschen:", ["Wählen..."] + sorted(df_db["Name"].unique()))
             if kill != "Wählen..." and st.button("🗑️ Löschen", type="primary"):
                 speichere_df_gs(df_db[df_db["Name"] != kill], "lebensmittel"); st.rerun()
+
 
