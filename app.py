@@ -111,7 +111,7 @@ def ai_analyse_ernaehrung(user_text, datenbank_liste):
         st.error(f"AI Fehler: {e}")
         return None
 
-# --- 4. NAVIGATION (WICHTIG: Hier wird 'menu' definiert!) ---
+# --- 4. NAVIGATION ---
 st.sidebar.markdown(f"# 🩺 {APP_NAME}")
 st.sidebar.markdown("---")
 menu = st.sidebar.radio("Navigation:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Zentrale"])
@@ -128,10 +128,21 @@ if menu == "1. Mahlzeit erfassen":
             with c1:
                 p_wahl = st.selectbox("Patient:", df_p["Name"], key="p_man")
                 m_zeit = st.selectbox("Mahlzeit:", MAHLZEITEN_LISTE, key="m_man")
-                lebensmittel = st.selectbox("Lebensmittel:", ["Bitte wählen..."] + sorted(df_db['Name'].unique()))
+                st.divider()
+                
+                # --- WIEDER EINGEFÜGT: KATEGORIE FILTER ---
+                kat_filter = st.radio("Kategorie filter:", ["Alle", "Intern", "Extern"], horizontal=True)
+                if kat_filter == "Alle":
+                    df_gefiltert = df_db
+                else:
+                    df_gefiltert = df_db[df_db['Typ'] == kat_filter]
+                
+                lebensmittel = st.selectbox("Lebensmittel:", ["Bitte wählen..."] + sorted(df_gefiltert['Name'].unique()))
+            
             if lebensmittel != "Bitte wählen...":
                 item = df_db[df_db['Name'] == lebensmittel].iloc[0]
                 with c2:
+                    st.info(f"Ref: {item.get('Standard_Menge','1 Stk')} ≈ {item.get('kcal_pro_Einheit', 0)} kcal")
                     menge = st.number_input("Menge:", min_value=0.1, value=1.0)
                     basis = st.radio("Basis:", ["Stück / Einheit", "Gramm"], horizontal=True)
                     stk_w = pd.to_numeric(item.get('stueck_gewicht', 0)) or 1
@@ -172,7 +183,8 @@ if menu == "1. Mahlzeit erfassen":
                 st.write(f"🔹 {res.get('item')} ({res.get('menge')} {res.get('basis')})")
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- MODUL 2: DASHBOARD ---
+# --- RESTLICHE MODULE (Dashboard, Patientenverwaltung, Datenbank) BLEIBEN GLEICH ---
+# ... (Code wie in der letzten Antwort für Modul 2, 3 und 4)
 elif menu == "2. Patienten-Dashboard":
     st.header("📊 Therapie-Dashboard")
     df_v, df_p, df_g = lade_daten_gs("verzehr"), lade_daten_gs("patienten"), lade_daten_gs("gewichtsverlauf")
@@ -205,7 +217,6 @@ elif menu == "2. Patienten-Dashboard":
                     df_hist["Datum"] = pd.to_datetime(df_hist["Datum"])
                     st.line_chart(df_hist.sort_values("Datum").set_index("Datum")["Gewicht"])
 
-# --- MODUL 3: PATIENTENVERWALTUNG ---
 elif menu == "3. Patientenverwaltung":
     st.header("👥 Patientenverwaltung")
     df_p = lade_daten_gs("patienten")
@@ -228,7 +239,6 @@ elif menu == "3. Patientenverwaltung":
             if st.button("Unwiderruflich löschen", type="primary"):
                 speichere_df_gs(df_p[df_p["Name"] != kill], "patienten"); st.rerun()
 
-# --- MODUL 4: DATENBANK ---
 elif menu == "4. Datenbank-Zentrale":
     st.header("🗄️ Stammdaten")
     t1, t2, t3 = st.tabs(["✏️ Editor", "🌍 OFF-Import", "🗑️ Löschen"])
