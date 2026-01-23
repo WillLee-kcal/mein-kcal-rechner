@@ -186,36 +186,45 @@ elif menu == "4. Datenbank-Zentrale":
         st.subheader("🔍 Weltweite Produktsuche")
         suche = st.text_input("Markenprodukt oder Barcode eingeben:")
         if suche:
-            try:
-                # Wir erstellen die API-Verbindung ganz frisch
-                api = openfoodfacts.API(user_agent="NutriCheckAI_Clinical/1.0")
-                res = api.product.text_search(suche)
-                
-                if res and 'products' in res and len(res['products']) > 0:
-                    for p in res['products'][:8]:
-                        p_n = p.get('product_name', 'Unbekannt')
-                        p_b = p.get('brands', 'Diverse Marke')
-                        nutr = p.get('nutriments', {})
-                        p_k = nutr.get('energy-kcal_100g')
-                        if p_k is not None:
-                            col_a, col_b = st.columns([3, 1])
-                            col_a.write(f"**{p_n}** — {p_b} ({p_k} kcal/100g)")
-                            if col_b.button("📥 Import", key=f"off_{p.get('_id', p_n)}"):
-                                neue_zeile = [p_n, p_k, 0, "1 Stück", 0, "Extern"]
-                                speichere_zeile_gs(neue_zeile, "lebensmittel")
-                                st.rerun()
-                else: 
-                    st.warning("Keine Treffer gefunden. Versuche es mit einem anderen Begriff.")
-            except Exception as e:
-                # HIER ZEIGEN WIR DEN ECHTEN FEHLER AN
-                st.error(f"Technischer Fehler: {e}")
-                st.info("Tipp: Prüfe, ob 'openfoodfacts' in deiner requirements.txt steht.")
-                
+            import requests # Wird für die direkte Web-Anfrage benötigt
+            
+            with st.spinner("Suche in globaler Datenbank..."):
+                try:
+                    # Wir fragen den Server direkt an (mit 25 Sekunden Puffer)
+                    url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={suche}&search_simple=1&action=process&json=1&page_size=8"
+                    headers = {'User-Agent': 'NutriCheckAI - Clinical App - Version 1.1'}
+                    
+                    response = requests.get(url, headers=headers, timeout=25)
+                    response.raise_for_status() # Prüft auf Web-Fehler
+                    data = response.json()
+                    
+                    if data and 'products' in data and len(data['products']) > 0:
+                        for p in data['products']:
+                            p_n = p.get('product_name', 'Unbekannt')
+                            p_b = p.get('brands', 'Diverse Marke')
+                            nutr = p.get('nutriments', {})
+                            p_k = nutr.get('energy-kcal_100g')
+                            
+                            if p_k is not None:
+                                col_a, col_b = st.columns([3, 1])
+                                col_a.write(f"**{p_n}** — *{p_b}* ({p_k} kcal/100g)")
+                                if col_b.button("📥 Import", key=f"off_{p.get('_id', p_n)}"):
+                                    neue_zeile = [p_n, p_k, 0, "1 Stück", 0, "Extern"]
+                                    speichere_zeile_gs(neue_zeile, "lebensmittel")
+                                    st.rerun()
+                    else:
+                        st.warning("Keine Treffer gefunden. Versuche es mit einem anderen Begriff.")
+                        
+                except requests.exceptions.Timeout:
+                    st.error("Der Server von Open Food Facts antwortet zu langsam (Timeout). Bitte versuche es gleich noch einmal.")
+                except Exception as e:
+                    st.error(f"Verbindungsfehler: {e}")
 
     with t3:
         if not df_db.empty:
             kill = st.selectbox("Lebensmittel entfernen:", ["Wählen..."] + sorted(df_db["Name"].unique()))
             if kill != "Wählen..." and st.button("🗑️ Löschen", type="primary"):
                 speichere_df_gs(df_db[df_db["Name"] != kill], "lebensmittel"); st.rerun()
+
 
 
