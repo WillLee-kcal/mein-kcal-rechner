@@ -187,8 +187,10 @@ elif menu == "4. Datenbank-Zentrale":
         suche = st.text_input("Markenprodukt oder Barcode eingeben:")
         if suche:
             try:
-                api = openfoodfacts.API(user_agent=f"{APP_NAME}/1.0")
+                # Wir erstellen die API-Verbindung ganz frisch
+                api = openfoodfacts.API(user_agent="NutriCheckAI_Clinical/1.0")
                 res = api.product.text_search(suche)
+                
                 if res and 'products' in res and len(res['products']) > 0:
                     for p in res['products'][:8]:
                         p_n = p.get('product_name', 'Unbekannt')
@@ -199,16 +201,21 @@ elif menu == "4. Datenbank-Zentrale":
                             col_a, col_b = st.columns([3, 1])
                             col_a.write(f"**{p_n}** — {p_b} ({p_k} kcal/100g)")
                             if col_b.button("📥 Import", key=f"off_{p.get('_id', p_n)}"):
-                                # Struktur: Name, kcal_100g, stueck_gewicht, Standard_Menge, kcal_pro_Einheit, Typ
                                 neue_zeile = [p_n, p_k, 0, "1 Stück", 0, "Extern"]
                                 speichere_zeile_gs(neue_zeile, "lebensmittel")
                                 st.rerun()
-                else: st.warning("Keine Treffer in Open Food Facts gefunden.")
-            except: st.error("Verbindung zu Open Food Facts aktuell nicht möglich.")
+                else: 
+                    st.warning("Keine Treffer gefunden. Versuche es mit einem anderen Begriff.")
+            except Exception as e:
+                # HIER ZEIGEN WIR DEN ECHTEN FEHLER AN
+                st.error(f"Technischer Fehler: {e}")
+                st.info("Tipp: Prüfe, ob 'openfoodfacts' in deiner requirements.txt steht.")
+                
 
     with t3:
         if not df_db.empty:
             kill = st.selectbox("Lebensmittel entfernen:", ["Wählen..."] + sorted(df_db["Name"].unique()))
             if kill != "Wählen..." and st.button("🗑️ Löschen", type="primary"):
                 speichere_df_gs(df_db[df_db["Name"] != kill], "lebensmittel"); st.rerun()
+
 
