@@ -10,7 +10,7 @@ import openfoodfacts
 MAHLZEITEN_LISTE = ["Frühstück", "Zwischenmahlzeit 1", "Mittagessen", "Zwischenmahlzeit 2", "Abendessen", "Zwischenmahlzeit 3"]
 
 # --- 2. VISUELLES STYLING (Medical Blue) ---
-st.set_page_config(page_title="Med-Log Pro Master", layout="wide", page_icon="🩺")
+st.set_page_config(page_title="NutriCheck IA", layout="wide", page_icon="🩺")
 
 st.markdown("""
     <style>
@@ -82,7 +82,7 @@ def speichere_df_gs(df, sheet_name):
     except: trigger_audio("error")
 
 # --- 5. NAVIGATION ---
-st.sidebar.markdown("# 🩺 Med-Log Pro")
+st.sidebar.markdown("# 🩺 NutriCheck IA")
 st.sidebar.markdown("---")
 menu = st.sidebar.radio("Navigation:", ["1. Mahlzeit erfassen", "2. Patienten-Dashboard", "3. Patientenverwaltung", "4. Datenbank-Zentrale"])
 
@@ -202,3 +202,4 @@ elif menu == "4. Datenbank-Zentrale":
             kill = st.selectbox("Lebensmittel entfernen:", ["Wählen..."] + sorted(df_db["Name"].unique()))
             if kill != "Wählen..." and st.button("🗑️ Löschen"):
                 speichere_df_gs(df_db[df_db["Name"] != kill], "lebensmittel"); st.rerun()
+
